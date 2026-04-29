@@ -1,0 +1,5 @@
+{
+  "extends": ["../../.eslintrc.json"],
+  "ignorePatterns": ["!**/*"],
+  "overrides": [{ "files": ["*.ts"], "parserOptions": { "project": ["apps/referentiel-service/tsconfig.*?.json"] } }]
+}

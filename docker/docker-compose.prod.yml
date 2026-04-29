@@ -1,0 +1,28 @@
+# SIGEA — Docker Compose Production
+# Déploiement sur intranet FAC — TLS PKI interne requis
+include:
+  - docker-compose.yml
+
+# Surcharges production
+x-service-prod: &service-prod
+  restart: always
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "50m"
+      max-file: "10"
+
+services:
+  postgres:
+    <<: *service-prod
+    ports: []  # Pas d'exposition externe en prod
+
+  redis:
+    <<: *service-prod
+    ports: []
+
+  gateway:
+    <<: *service-prod
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: warn

@@ -1,0 +1,25 @@
+{
+  "name": "cemaa-service",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/cemaa-service/src",
+  "projectType": "application",
+  "targets": {
+    "build": {
+      "executor": "@nx/webpack:webpack",
+      "options": { "outputPath": "dist/apps/cemaa-service", "main": "apps/cemaa-service/src/main.ts", "tsConfig": "apps/cemaa-service/tsconfig.app.json" }
+    },
+    "serve": {
+      "executor": "@nx/js:node",
+      "options": { "buildTarget": "cemaa-service:build" }
+    },
+    "test": {
+      "executor": "@nx/jest:jest",
+      "options": { "jestConfig": "apps/cemaa-service/jest.config.ts" }
+    },
+    "lint": {
+      "executor": "@nx/eslint:lint",
+      "options": { "lintFilePatterns": ["apps/cemaa-service/**/*.ts"] }
+    }
+  },
+  "tags": ["type:app", "scope:cemaa-service"]
+}

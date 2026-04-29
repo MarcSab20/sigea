@@ -1,0 +1,12 @@
+{
+  "name": "shared-audit",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/shared-audit/src",
+  "projectType": "library",
+  "targets": {
+    "build": { "executor": "@nx/js:tsc", "options": { "outputPath": "dist/libs/shared-audit", "main": "libs/shared-audit/src/index.ts", "tsConfig": "libs/shared-audit/tsconfig.lib.json" } },
+    "test": { "executor": "@nx/jest:jest", "options": { "jestConfig": "libs/shared-audit/jest.config.ts" } },
+    "lint": { "executor": "@nx/eslint:lint", "options": { "lintFilePatterns": ["libs/shared-audit/**/*.ts"] } }
+  },
+  "tags": ["type:lib", "scope:shared-audit"]
+}

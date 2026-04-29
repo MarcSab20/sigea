@@ -1,0 +1,12 @@
+{
+  "name": "shared-events",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/shared-events/src",
+  "projectType": "library",
+  "targets": {
+    "build": { "executor": "@nx/js:tsc", "options": { "outputPath": "dist/libs/shared-events", "main": "libs/shared-events/src/index.ts", "tsConfig": "libs/shared-events/tsconfig.lib.json" } },
+    "test": { "executor": "@nx/jest:jest", "options": { "jestConfig": "libs/shared-events/jest.config.ts" } },
+    "lint": { "executor": "@nx/eslint:lint", "options": { "lintFilePatterns": ["libs/shared-events/**/*.ts"] } }
+  },
+  "tags": ["type:lib", "scope:shared-events"]
+}

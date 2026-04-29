@@ -1,0 +1,25 @@
+{
+  "name": "validation-service",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/validation-service/src",
+  "projectType": "application",
+  "targets": {
+    "build": {
+      "executor": "@nx/webpack:webpack",
+      "options": { "outputPath": "dist/apps/validation-service", "main": "apps/validation-service/src/main.ts", "tsConfig": "apps/validation-service/tsconfig.app.json" }
+    },
+    "serve": {
+      "executor": "@nx/js:node",
+      "options": { "buildTarget": "validation-service:build" }
+    },
+    "test": {
+      "executor": "@nx/jest:jest",
+      "options": { "jestConfig": "apps/validation-service/jest.config.ts" }
+    },
+    "lint": {
+      "executor": "@nx/eslint:lint",
+      "options": { "lintFilePatterns": ["apps/validation-service/**/*.ts"] }
+    }
+  },
+  "tags": ["type:app", "scope:validation-service"]
+}

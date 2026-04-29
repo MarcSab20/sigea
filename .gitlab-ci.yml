@@ -1,0 +1,89 @@
+# SIGEA — Pipeline CI/CD GitLab
+# FAC/DSIC/SIGEA-ARCH/2025
+
+image: node:20-alpine
+
+variables:
+  NX_CLOUD: "false"
+  NX_BASE: $CI_MERGE_REQUEST_DIFF_BASE_SHA
+
+stages:
+  - lint
+  - test
+  - build
+  - staging
+  - production
+
+cache:
+  key: ${CI_COMMIT_REF_SLUG}
+  paths:
+    - node_modules/
+    - .nx/cache/
+
+.install: &install
+  before_script:
+    - npm ci --prefer-offline
+
+lint:
+  stage: lint
+  <<: *install
+  script:
+    - npx nx affected --target=lint --base=origin/main --parallel=5
+  only:
+    - merge_requests
+    - main
+
+test:
+  stage: test
+  <<: *install
+  services:
+    - postgres:16-alpine
+    - redis:7-alpine
+  variables:
+    POSTGRES_DB: sigea_test
+    POSTGRES_USER: sigea_app
+    POSTGRES_PASSWORD: test_password_ci
+    DATABASE_URL: postgresql://sigea_app:test_password_ci@postgres/sigea_test
+    REDIS_URL: redis://redis:6379
+  script:
+    - npx nx affected --target=test --base=origin/main --parallel=3 --coverage
+  coverage: '/Statements.*?(\d+(?:\.\d+)?)%/'
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage/**/cobertura-coverage.xml
+
+build:
+  stage: build
+  <<: *install
+  script:
+    - npx nx affected --target=build --base=origin/main --configuration=production
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 1 hour
+  only:
+    - main
+
+deploy-staging:
+  stage: staging
+  environment: staging
+  script:
+    - echo "🚀 Déploiement staging..."
+    - docker compose -f docker/docker-compose.yml up -d --build
+  when: manual
+  only:
+    - main
+
+deploy-production:
+  stage: production
+  environment: production
+  script:
+    - echo "🔒 Déploiement production — approbation requise"
+    - docker compose -f docker/docker-compose.prod.yml up -d --build
+  when: manual
+  only:
+    - main
+  needs:
+    - deploy-staging

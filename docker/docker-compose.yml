@@ -1,0 +1,250 @@
+# SIGEA — Docker Compose Développement
+# Usage : docker compose -f docker/docker-compose.yml up -d
+
+services:
+
+  # ── Infrastructure ────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: sigea_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       sigea
+      POSTGRES_USER:     sigea_app
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=fr_FR.UTF-8"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sigea_app -d sigea"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: sigea_redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD}
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redisdata:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: sigea_rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: sigea
+      RABBITMQ_DEFAULT_PASS: ${RABBIT_PASSWORD}
+      RABBITMQ_DEFAULT_VHOST: /
+    volumes:
+      - rabbitmqdata:/var/lib/rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"  # Management UI
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  # ── Services applicatifs ───────────────────────────────────────────────────
+  gateway:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.service
+      args:
+        SERVICE: gateway
+    container_name: sigea_gateway
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      NODE_ENV: development
+      DATABASE_URL: postgresql://sigea_app:${DB_PASSWORD}@postgres:5432/sigea
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      RABBITMQ_URL: amqp://sigea:${RABBIT_PASSWORD}@rabbitmq:5672
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
+      AUTH_SERVICE_URL: http://auth-service:3001
+      REFERENTIEL_SERVICE_URL: http://referentiel-service:3002
+      VOL_SERVICE_URL: http://vol-service:3003
+      MANIFESTE_SERVICE_URL: http://manifeste-service:3004
+      VALIDATION_SERVICE_URL: http://validation-service:3005
+      CEMAA_SERVICE_URL: http://cemaa-service:3006
+      NOTIFICATION_SERVICE_URL: http://notification-service:3007
+      PDF_SERVICE_URL: http://pdf-service:3008
+    depends_on:
+      postgres:  { condition: service_healthy }
+      redis:     { condition: service_healthy }
+      rabbitmq:  { condition: service_healthy }
+
+  auth-service:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.service
+      args:
+        SERVICE: auth-service
+    container_name: sigea_auth
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: 3001
+      NODE_ENV: development
+      DATABASE_URL: postgresql://sigea_app:${DB_PASSWORD}@postgres:5432/sigea
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
+      JWT_ACCESS_EXPIRY: 15m
+      JWT_REFRESH_EXPIRY: 7d
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+
+  referentiel-service:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.service
+      args:
+        SERVICE: referentiel-service
+    container_name: sigea_referentiel
+    ports: ["3002:3002"]
+    environment:
+      PORT: 3002
+      DATABASE_URL: postgresql://sigea_app:${DB_PASSWORD}@postgres:5432/sigea
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+
+  vol-service:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.service
+      args:
+        SERVICE: vol-service
+    container_name: sigea_vol
+    ports: ["3003:3003"]
+    environment:
+      PORT: 3003
+      DATABASE_URL: postgresql://sigea_app:${DB_PASSWORD}@postgres:5432/sigea
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      RABBITMQ_URL: amqp://sigea:${RABBIT_PASSWORD}@rabbitmq:5672
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  manifeste-service:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.service
+      args:
+        SERVICE: manifeste-service
+    container_name: sigea_manifeste
+    ports: ["3004:3004"]
+    environment:
+      PORT: 3004
+      DATABASE_URL: postgresql://sigea_app:${DB_PASSWORD}@postgres:5432/sigea
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      RABBITMQ_URL: amqp://sigea:${RABBIT_PASSWORD}@rabbitmq:5672
+      CEMAA_ENCRYPTION_KEY: ${CEMAA_ENCRYPTION_KEY}
+    depends_on:
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+
+  validation-service:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.service
+      args:
+        SERVICE: validation-service
+    container_name: sigea_validation
+    ports: ["3005:3005"]
+    environment:
+      PORT: 3005
+      DATABASE_URL: postgresql://sigea_app:${DB_PASSWORD}@postgres:5432/sigea
+      RABBITMQ_URL: amqp://sigea:${RABBIT_PASSWORD}@rabbitmq:5672
+    depends_on:
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+
+  cemaa-service:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.service
+      args:
+        SERVICE: cemaa-service
+    container_name: sigea_cemaa
+    ports: ["3006:3006"]
+    environment:
+      PORT: 3006
+      DATABASE_URL: postgresql://sigea_app:${DB_PASSWORD}@postgres:5432/sigea
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      RABBITMQ_URL: amqp://sigea:${RABBIT_PASSWORD}@rabbitmq:5672
+      CEMAA_ENCRYPTION_KEY: ${CEMAA_ENCRYPTION_KEY}
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  notification-service:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.service
+      args:
+        SERVICE: notification-service
+    container_name: sigea_notification
+    ports: ["3007:3007"]
+    environment:
+      PORT: 3007
+      RABBITMQ_URL: amqp://sigea:${RABBIT_PASSWORD}@rabbitmq:5672
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
+    depends_on:
+      rabbitmq: { condition: service_healthy }
+
+  pdf-service:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.service
+      args:
+        SERVICE: pdf-service
+    container_name: sigea_pdf
+    ports: ["3008:3008"]
+    environment:
+      PORT: 3008
+      DATABASE_URL: postgresql://sigea_app:${DB_PASSWORD}@postgres:5432/sigea
+      RABBITMQ_URL: amqp://sigea:${RABBIT_PASSWORD}@rabbitmq:5672
+      CEMAA_ENCRYPTION_KEY: ${CEMAA_ENCRYPTION_KEY}
+    depends_on:
+      postgres:  { condition: service_healthy }
+      rabbitmq:  { condition: service_healthy }
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.frontend
+    container_name: sigea_frontend
+    ports: ["5173:80"]
+    environment:
+      VITE_API_URL: http://localhost:3000/api
+      VITE_WS_URL: ws://localhost:3000/notifications
+    depends_on:
+      - gateway
+
+volumes:
+  pgdata:     { driver: local }
+  redisdata:  { driver: local }
+  rabbitmqdata: { driver: local }

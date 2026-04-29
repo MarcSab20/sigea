@@ -1,0 +1,25 @@
+{
+  "name": "referentiel-service",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/referentiel-service/src",
+  "projectType": "application",
+  "targets": {
+    "build": {
+      "executor": "@nx/webpack:webpack",
+      "options": { "outputPath": "dist/apps/referentiel-service", "main": "apps/referentiel-service/src/main.ts", "tsConfig": "apps/referentiel-service/tsconfig.app.json" }
+    },
+    "serve": {
+      "executor": "@nx/js:node",
+      "options": { "buildTarget": "referentiel-service:build" }
+    },
+    "test": {
+      "executor": "@nx/jest:jest",
+      "options": { "jestConfig": "apps/referentiel-service/jest.config.ts" }
+    },
+    "lint": {
+      "executor": "@nx/eslint:lint",
+      "options": { "lintFilePatterns": ["apps/referentiel-service/**/*.ts"] }
+    }
+  },
+  "tags": ["type:app", "scope:referentiel-service"]
+}

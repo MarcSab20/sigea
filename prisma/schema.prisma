@@ -1,0 +1,352 @@
+// SIGEA — Schéma Prisma Principal
+// Source de vérité unique — FAC/DSIC/SIGEA-ARCH/2025
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Enums ──────────────────────────────────────────────────────────────────
+
+enum RoleUtilisateur {
+  chef_escale
+  comeso
+  comgmo
+  combord
+  combase
+  cemaa
+  admin
+}
+
+enum StatutManifeste {
+  BROUILLON
+  SOUMIS
+  EN_VALIDATION
+  VALIDE
+  REJETE
+}
+
+enum EtapeValidation {
+  COMESO
+  COMGMO
+  COMBORD
+  CEMAA_SENSIBLE
+  COMBASE
+}
+
+enum StatutValidation {
+  EN_ATTENTE
+  APPROUVE
+  REJETE
+}
+
+enum CategoriePassager {
+  TROUPES
+  TROUPES_PARA
+  CHEF_MIL
+  MISSION
+  PERMISSION
+  EVASAN
+  VIP
+  CIVIL
+  OP_SENSIBLE
+}
+
+enum TypeMission {
+  PROJECTION
+  PARA
+  LIAISON
+  LOGISTIQUE
+  EVASAN
+  VIP
+  OP_SENSIBLE
+}
+
+enum TypeConsigne {
+  PERSONNEL
+  MATERIEL
+}
+
+enum OrigineEnregistrement {
+  SAISIE
+  CEMAA
+}
+
+enum TypeMissionLogistique {
+  AA
+  IA
+  INTERMINISTERIEL
+  INDIVIDUEL
+  SENSIBLE_CEMAA
+}
+
+enum FonctionEquipage {
+  COMBORD
+  COPILOTE
+  MECANICIEN
+  AUTRE
+}
+
+// ── Modèles ────────────────────────────────────────────────────────────────
+
+model Base {
+  id             String       @id @default(uuid())
+  code_base      String       @unique
+  nom            String
+  region         String
+  admin_id       String?
+  administrateur Utilisateur? @relation("BaseAdmin", fields: [admin_id], references: [id])
+  utilisateurs   Utilisateur[]
+  manifestes     Manifeste[]
+  vols_depart    Vol[]        @relation("VolDepart")
+  vols_arrivee   Vol[]        @relation("VolArrivee")
+  createdAt      DateTime     @default(now())
+}
+
+model Utilisateur {
+  id            String           @id @default(uuid())
+  nom           String
+  prenom        String
+  grade         String
+  login         String           @unique
+  password_hash String
+  otp_secret    String?
+  role          RoleUtilisateur
+  base_id       String
+  base          Base             @relation(fields: [base_id], references: [id])
+  base_admin    Base[]           @relation("BaseAdmin")
+  actif         Boolean          @default(true)
+  last_login    DateTime?
+  sessions      Session[]
+  validations   ValidationEtape[]
+  audits        AuditLog[]
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  @@index([base_id, role])
+}
+
+model Session {
+  id            String   @id @default(uuid())
+  utilisateur_id String
+  utilisateur   Utilisateur @relation(fields: [utilisateur_id], references: [id])
+  refresh_hash  String
+  expires_at    DateTime
+  createdAt     DateTime @default(now())
+}
+
+model Aeronef {
+  id            String   @id @default(uuid())
+  immatriculation String @unique
+  type          String
+  capacite_places Int
+  capacite_cargo_kg Decimal @db.Decimal(10, 2)
+  actif         Boolean  @default(true)
+  vols          Vol[]
+  createdAt     DateTime @default(now())
+}
+
+model Unite {
+  id   String @id @default(uuid())
+  code String @unique
+  nom  String
+  type String
+}
+
+model Vol {
+  id                String      @id @default(uuid())
+  numero_mission    String      @unique
+  immatriculation   String
+  aeronef           Aeronef     @relation(fields: [immatriculation], references: [immatriculation])
+  date_heure        DateTime
+  base_depart_id    String
+  base_depart       Base        @relation("VolDepart", fields: [base_depart_id], references: [id])
+  base_arrivee_id   String
+  base_arrivee      Base        @relation("VolArrivee", fields: [base_arrivee_id], references: [id])
+  type_mission      TypeMission
+  flag_sensible     Boolean     @default(false)
+  capacite_places   Int
+  capacite_cargo_kg Decimal     @db.Decimal(10, 2)
+  statut            String      @default("PLANIFIE")
+  manifestes        Manifeste[]
+  consignes_cemaa   ConsigneCemaa[]
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+}
+
+model ConsigneCemaa {
+  id                String       @id @default(uuid())
+  vol_id            String
+  vol               Vol          @relation(fields: [vol_id], references: [id])
+  escale_base_id    String?
+  type              TypeConsigne
+  contenu_chiffre   String       // JSON EncryptedPayload
+  places_bloquees   Int          @default(0)
+  masse_bloquee_kg  Decimal      @default(0) @db.Decimal(10, 2)
+  valide_par_cemaa  String
+  date              DateTime     @default(now())
+
+  @@index([vol_id])
+}
+
+model Manifeste {
+  id                  String          @id @default(uuid())
+  vol_id              String
+  vol                 Vol             @relation(fields: [vol_id], references: [id])
+  base_id             String
+  base                Base            @relation(fields: [base_id], references: [id])
+  manifeste_maitre_id String?
+  manifeste_maitre    Manifeste?      @relation("ManifestHierarchy", fields: [manifeste_maitre_id], references: [id])
+  enfants             Manifeste[]     @relation("ManifestHierarchy")
+  etape_vol           String          @default("A")
+  version             Int             @default(1)
+  statut              StatutManifeste @default(BROUILLON)
+  flag_sensible       Boolean         @default(false)
+  cree_par            String
+  passagers           Passager[]
+  materiels           Materiel[]
+  marchandises        MarchandiseDangereuse[]
+  equipages           Equipage[]
+  validations         ValidationEtape[]
+  alertes             AlerteEscale[]
+  compte_rendu        CompteRenduCemaa?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+
+  @@index([base_id, statut])
+  @@index([vol_id, base_id])
+}
+
+model Passager {
+  id                    String                @id @default(uuid())
+  manifeste_id          String
+  manifeste             Manifeste             @relation(fields: [manifeste_id], references: [id], onDelete: Cascade)
+  base_id               String
+  nom                   String
+  prenom                String
+  grade                 String?
+  categorie             CategoriePassager
+  matricule             String?
+  unite                 String?
+  destination           String
+  nb_bagages            Int
+  masse_bagages_kg      Decimal               @db.Decimal(7, 2)
+  couleur_bagages       String?
+  contact_urgence_nom   String
+  contact_urgence_tel   String
+  contact_urgence_qual  String?
+  ref_autorisation      String?
+  origine               OrigineEnregistrement @default(SAISIE)
+  verrouille            Boolean               @default(false)
+  sensible              Boolean               @default(false)
+  createdAt             DateTime              @default(now())
+
+  @@index([manifeste_id])
+  @@index([base_id])
+}
+
+model Materiel {
+  id                  String                @id @default(uuid())
+  manifeste_id        String
+  manifeste           Manifeste             @relation(fields: [manifeste_id], references: [id], onDelete: Cascade)
+  base_id             String
+  designation         String
+  type_mission_log    TypeMissionLogistique
+  proprietaire        String
+  poids_kg            Decimal               @db.Decimal(10, 2)
+  volume              Decimal?              @db.Decimal(10, 3)
+  destination         String
+  expediteur_nom      String
+  expediteur_fonction String
+  expediteur_tel      String
+  origine             OrigineEnregistrement @default(SAISIE)
+  verrouille          Boolean               @default(false)
+  sensible            Boolean               @default(false)
+  createdAt           DateTime              @default(now())
+
+  @@index([manifeste_id])
+}
+
+model MarchandiseDangereuse {
+  id             String    @id @default(uuid())
+  manifeste_id   String
+  manifeste      Manifeste @relation(fields: [manifeste_id], references: [id], onDelete: Cascade)
+  nature         String
+  classe_iata    String
+  description    String    @db.VarChar(500)
+  poids_kg       Decimal   @db.Decimal(10, 2)
+  volume         Decimal?  @db.Decimal(10, 3)
+  conditionnement String
+  destination    String
+  proprietaire   String
+  proprietaire_tel String
+
+  @@index([manifeste_id])
+}
+
+model Equipage {
+  id           String          @id @default(uuid())
+  manifeste_id String
+  manifeste    Manifeste       @relation(fields: [manifeste_id], references: [id], onDelete: Cascade)
+  base_id      String
+  nom          String
+  prenom       String
+  grade        String
+  fonction     FonctionEquipage
+}
+
+model ValidationEtape {
+  id           String           @id @default(uuid())
+  manifeste_id String
+  manifeste    Manifeste        @relation(fields: [manifeste_id], references: [id])
+  etape        EtapeValidation
+  validateur_id String?
+  validateur   Utilisateur?     @relation(fields: [validateur_id], references: [id])
+  date_heure   DateTime         @default(now())
+  commentaire  String?
+  statut       StatutValidation @default(EN_ATTENTE)
+
+  @@unique([manifeste_id, etape], name: "manifeste_id_etape")
+  @@index([manifeste_id, etape])
+}
+
+model AlerteEscale {
+  id           String    @id @default(uuid())
+  manifeste_id String
+  manifeste    Manifeste @relation(fields: [manifeste_id], references: [id])
+  type_alerte  String
+  destinataires String[]
+  message      String
+  date_emission DateTime @default(now())
+  lu_par       String[]
+}
+
+model CompteRenduCemaa {
+  id                     String    @id @default(uuid())
+  manifeste_id           String    @unique
+  manifeste              Manifeste @relation(fields: [manifeste_id], references: [id])
+  date_envoi             DateTime  @default(now())
+  pdf_chiffre            String    // chemin ou base64 du PDF chiffré
+  accuse_reception_cemaa Boolean   @default(false)
+}
+
+model AuditLog {
+  id           String   @id @default(uuid())
+  user_id      String
+  utilisateur  Utilisateur @relation(fields: [user_id], references: [id])
+  base_id      String
+  role         String
+  action       String
+  resource     String?
+  method       String?
+  path         String?
+  ip           String?
+  content_hash String   // SHA-256 du contenu — intégrité garantie
+  timestamp    DateTime @default(now())
+
+  @@index([user_id, timestamp])
+}

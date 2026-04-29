@@ -1,0 +1,25 @@
+{
+  "name": "gateway",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/gateway/src",
+  "projectType": "application",
+  "targets": {
+    "build": {
+      "executor": "@nx/webpack:webpack",
+      "options": { "outputPath": "dist/apps/gateway", "main": "apps/gateway/src/main.ts", "tsConfig": "apps/gateway/tsconfig.app.json" }
+    },
+    "serve": {
+      "executor": "@nx/js:node",
+      "options": { "buildTarget": "gateway:build" }
+    },
+    "test": {
+      "executor": "@nx/jest:jest",
+      "options": { "jestConfig": "apps/gateway/jest.config.ts" }
+    },
+    "lint": {
+      "executor": "@nx/eslint:lint",
+      "options": { "lintFilePatterns": ["apps/gateway/**/*.ts"] }
+    }
+  },
+  "tags": ["type:app", "scope:gateway"]
+}

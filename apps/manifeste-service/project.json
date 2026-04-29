@@ -1,0 +1,25 @@
+{
+  "name": "manifeste-service",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/manifeste-service/src",
+  "projectType": "application",
+  "targets": {
+    "build": {
+      "executor": "@nx/webpack:webpack",
+      "options": { "outputPath": "dist/apps/manifeste-service", "main": "apps/manifeste-service/src/main.ts", "tsConfig": "apps/manifeste-service/tsconfig.app.json" }
+    },
+    "serve": {
+      "executor": "@nx/js:node",
+      "options": { "buildTarget": "manifeste-service:build" }
+    },
+    "test": {
+      "executor": "@nx/jest:jest",
+      "options": { "jestConfig": "apps/manifeste-service/jest.config.ts" }
+    },
+    "lint": {
+      "executor": "@nx/eslint:lint",
+      "options": { "lintFilePatterns": ["apps/manifeste-service/**/*.ts"] }
+    }
+  },
+  "tags": ["type:app", "scope:manifeste-service"]
+}

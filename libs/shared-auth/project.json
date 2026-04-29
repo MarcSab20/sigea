@@ -1,0 +1,12 @@
+{
+  "name": "shared-auth",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/shared-auth/src",
+  "projectType": "library",
+  "targets": {
+    "build": { "executor": "@nx/js:tsc", "options": { "outputPath": "dist/libs/shared-auth", "main": "libs/shared-auth/src/index.ts", "tsConfig": "libs/shared-auth/tsconfig.lib.json" } },
+    "test": { "executor": "@nx/jest:jest", "options": { "jestConfig": "libs/shared-auth/jest.config.ts" } },
+    "lint": { "executor": "@nx/eslint:lint", "options": { "lintFilePatterns": ["libs/shared-auth/**/*.ts"] } }
+  },
+  "tags": ["type:lib", "scope:shared-auth"]
+}
