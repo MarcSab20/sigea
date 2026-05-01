@@ -50,7 +50,7 @@ services:
     restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: sigea
-      RABBITMQ_DEFAULT_PASS: ${RABBIT_PASSWORD}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
       RABBITMQ_DEFAULT_VHOST: /
     volumes:
       - rabbitmqdata:/var/lib/rabbitmq

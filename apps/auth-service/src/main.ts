@@ -1,9 +1,9 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
-import { authserviceModule } from './authservice.module';
+import { AuthServiceModule } from './auth-service.module';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(authserviceModule);
+  const app = await NestFactory.create(AuthServiceModule);
   const logger = new Logger('Bootstrap');
 
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));

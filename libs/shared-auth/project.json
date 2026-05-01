@@ -1,12 +1,26 @@
 {
   "name": "shared-auth",
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
-  "sourceRoot": "libs/shared-auth/src",
+  "sourceRoot": "libs/shared-crypto/src",
   "projectType": "library",
   "targets": {
-    "build": { "executor": "@nx/js:tsc", "options": { "outputPath": "dist/libs/shared-auth", "main": "libs/shared-auth/src/index.ts", "tsConfig": "libs/shared-auth/tsconfig.lib.json" } },
-    "test": { "executor": "@nx/jest:jest", "options": { "jestConfig": "libs/shared-auth/jest.config.ts" } },
-    "lint": { "executor": "@nx/eslint:lint", "options": { "lintFilePatterns": ["libs/shared-auth/**/*.ts"] } }
+    "build": {
+      "executor": "@nx/js:tsc",
+      "options": {
+        "outputPath": "dist/libs/shared-crypto",
+        "main": "libs/shared-crypto/src/index.ts",
+        "tsConfig": "libs/shared-crypto/tsconfig.lib.json",
+        "rootDir": "."
+      }
+    },
+    "test": {
+      "executor": "@nx/jest:jest",
+      "options": { "jestConfig": "libs/shared-crypto/jest.config.ts" }
+    },
+    "lint": {
+      "executor": "@nx/eslint:lint",
+      "options": { "lintFilePatterns": ["libs/shared-crypto/**/*.ts"] }
+    }
   },
-  "tags": ["type:lib", "scope:shared-auth"]
+  "tags": ["type:lib", "scope:shared-crypto"]
 }
