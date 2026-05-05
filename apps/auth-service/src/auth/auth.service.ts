@@ -20,7 +20,7 @@ export class AuthService {
   ) {}
 
   async login(dto: LoginDto): Promise<{ challenge_token: string }> {
-    const user = await this.usersService.validateCredentials(dto.login, dto.password);
+    const user = await this.usersService.validateCredentials(dto.login, dto.password) as { id: string; role: string; base_id: string; login: string } | null;
     if (!user) throw new UnauthorizedException('Identifiants invalides');
 
     // Étape 1 : retourne un token temporaire pour la validation OTP
@@ -41,7 +41,7 @@ export class AuthService {
 
     if (payload.step !== 'otp_required') throw new UnauthorizedException('Flux invalide');
 
-    const user = await this.usersService.findById(payload.sub);
+    const user = await this.usersService.findById(payload.sub) as { id: string; role: string; base_id: string; login: string } | null;
     if (!user) throw new UnauthorizedException('Utilisateur introuvable');
 
     const otpValid = await this.otpService.verify(user.id, dto.otp_code);
@@ -64,7 +64,7 @@ export class AuthService {
   async refreshToken(token: string): Promise<{ access_token: string }> {
     // Délégué au SessionService — implémentation complète en Phase 1
     const userId = await this.sessionService.validateAndGetUserId(token);
-    const user = await this.usersService.findById(userId);
+    const user = await this.usersService.findById(userId) as { id: string; role: string; base_id: string } | null;
     if (!user) throw new UnauthorizedException();
     const jti = crypto.randomUUID();
     const accessToken = this.jwtService.sign({

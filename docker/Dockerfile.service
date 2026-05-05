@@ -4,13 +4,21 @@ WORKDIR /app
 
 COPY package*.json ./
 COPY tsconfig.base.json ./
-RUN npm ci --ignore-scripts
+
+# Configuration npm robuste pour réseau instable
+RUN npm config set fetch-retry-mintimeout 20000 \
+    && npm config set fetch-retry-maxtimeout 120000 \
+    && npm config set fetch-retries 5 \
+    && npm ci --ignore-scripts
+
+# Générer Prisma sans téléchargement réseau
+# Les binaires sont déjà dans node_modules après npm ci
+COPY prisma ./prisma
+RUN PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING=1 \
+    npx prisma generate --schema=prisma/schema.prisma
 
 COPY apps/${SERVICE} ./apps/${SERVICE}
 COPY libs ./libs
-COPY prisma ./prisma
-
-RUN npx prisma generate
 
 RUN npx tsc \
     --project apps/${SERVICE}/tsconfig.app.json \
@@ -20,12 +28,14 @@ RUN npx tsc \
 
 FROM node:20-alpine AS runner
 ARG SERVICE
-ENV SERVICE_NAME=${SERVICE}
 RUN addgroup -g 1001 -S nodejs && adduser -S sigea -u 1001
 WORKDIR /app
 COPY --from=builder --chown=sigea:nodejs /app/dist/apps/${SERVICE} ./dist
 COPY --from=builder --chown=sigea:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=sigea:nodejs /app/prisma ./prisma
+# Copier le client Prisma pré-généré (évite tout téléchargement réseau)
+COPY node_modules/.prisma ./node_modules/.prisma
+COPY node_modules/@prisma/client ./node_modules/@prisma/client
 USER sigea
 EXPOSE ${PORT:-3000}
 CMD ["node", "dist/src/main.js"]

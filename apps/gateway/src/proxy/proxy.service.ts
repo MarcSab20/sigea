@@ -3,6 +3,7 @@ import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { Request, Response } from 'express';
 import { firstValueFrom } from 'rxjs';
+import { AxiosResponse } from 'axios';
 
 @Injectable()
 export class ProxyService {
@@ -18,7 +19,7 @@ export class ProxyService {
     const targetUrl = `${baseUrl}${req.path}${req.url.includes('?') ? '?' + req.url.split('?')[1] : ''}`;
 
     try {
-      const response = await firstValueFrom(
+      const response: AxiosResponse = await firstValueFrom(
         this.http.request({
           method: req.method as 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH',
           url: targetUrl,
@@ -30,8 +31,9 @@ export class ProxyService {
       res.status(response.status).json(response.data);
     } catch (error: unknown) {
       this.logger.error(`Proxy error → ${service}: ${String(error)}`);
-      const status = (error as { response?: { status?: number } })?.response?.status ?? 502;
-      const data   = (error as { response?: { data?: unknown } })?.response?.data ?? { message: 'Service indisponible' };
+      const axiosError = error as { response?: { status?: number; data?: unknown } };
+      const status = axiosError?.response?.status ?? 502;
+      const data   = axiosError?.response?.data ?? { message: 'Service indisponible' };
       res.status(status).json(data);
     }
   }
