@@ -5,7 +5,7 @@
   "projectType": "application",
   "targets": {
     "build": {
-      "executor": "@nx/webpack:webpack",
+      "executor": "@nx/js:tsc",
       "options": { "outputPath": "dist/apps/manifeste-service", "main": "apps/manifeste-service/src/main.ts", "tsConfig": "apps/manifeste-service/tsconfig.app.json" }
     },
     "serve": {

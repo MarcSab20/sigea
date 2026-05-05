@@ -1,26 +1,26 @@
 {
   "name": "shared-audit",
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
-  "sourceRoot": "libs/shared-crypto/src",
+  "sourceRoot": "libs/shared-audit/src",
   "projectType": "library",
   "targets": {
     "build": {
       "executor": "@nx/js:tsc",
       "options": {
-        "outputPath": "dist/libs/shared-crypto",
-        "main": "libs/shared-crypto/src/index.ts",
-        "tsConfig": "libs/shared-crypto/tsconfig.lib.json",
+        "outputPath": "dist/libs/shared-audit",
+        "main": "libs/shared-audit/src/index.ts",
+        "tsConfig": "libs/shared-audit/tsconfig.lib.json",
         "rootDir": "."
       }
     },
     "test": {
       "executor": "@nx/jest:jest",
-      "options": { "jestConfig": "libs/shared-crypto/jest.config.ts" }
+      "options": { "jestConfig": "libs/shared-audit/jest.config.ts" }
     },
     "lint": {
       "executor": "@nx/eslint:lint",
-      "options": { "lintFilePatterns": ["libs/shared-crypto/**/*.ts"] }
+      "options": { "lintFilePatterns": ["libs/shared-audit/**/*.ts"] }
     }
   },
-  "tags": ["type:lib", "scope:shared-crypto"]
+  "tags": ["type:lib", "scope:shared-audit"]
 }

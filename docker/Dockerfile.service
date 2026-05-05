@@ -1,22 +1,31 @@
-# Multi-stage build — Service NestJS
 FROM node:20-alpine AS builder
 ARG SERVICE
 WORKDIR /app
+
 COPY package*.json ./
 COPY tsconfig.base.json ./
 RUN npm ci --ignore-scripts
+
 COPY apps/${SERVICE} ./apps/${SERVICE}
 COPY libs ./libs
 COPY prisma ./prisma
+
 RUN npx prisma generate
-RUN npx nx build ${SERVICE} --configuration=production
+
+RUN npx tsc \
+    --project apps/${SERVICE}/tsconfig.app.json \
+    --rootDir . \
+    --outDir dist/apps/${SERVICE} \
+    --noEmit false
 
 FROM node:20-alpine AS runner
 ARG SERVICE
+ENV SERVICE_NAME=${SERVICE}
 RUN addgroup -g 1001 -S nodejs && adduser -S sigea -u 1001
 WORKDIR /app
 COPY --from=builder --chown=sigea:nodejs /app/dist/apps/${SERVICE} ./dist
 COPY --from=builder --chown=sigea:nodejs /app/node_modules ./node_modules
+COPY --from=builder --chown=sigea:nodejs /app/prisma ./prisma
 USER sigea
 EXPOSE ${PORT:-3000}
-CMD ["node", "dist/main.js"]
+CMD ["node", "dist/src/main.js"]

@@ -5,7 +5,7 @@
   "projectType": "application",
   "targets": {
     "build": {
-      "executor": "@nx/webpack:webpack",
+      "executor": "@nx/js:tsc",
       "options": { "outputPath": "dist/apps/cemaa-service", "main": "apps/cemaa-service/src/main.ts", "tsConfig": "apps/cemaa-service/tsconfig.app.json" }
     },
     "serve": {

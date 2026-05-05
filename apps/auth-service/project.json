@@ -5,7 +5,7 @@
   "projectType": "application",
   "targets": {
     "build": {
-      "executor": "@nx/webpack:webpack",
+      "executor": "@nx/js:tsc",
       "options": { "outputPath": "dist/apps/auth-service", "main": "apps/auth-service/src/main.ts", "tsConfig": "apps/auth-service/tsconfig.app.json" }
     },
     "serve": {

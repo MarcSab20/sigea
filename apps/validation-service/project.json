@@ -5,7 +5,7 @@
   "projectType": "application",
   "targets": {
     "build": {
-      "executor": "@nx/webpack:webpack",
+      "executor": "@nx/js:tsc",
       "options": { "outputPath": "dist/apps/validation-service", "main": "apps/validation-service/src/main.ts", "tsConfig": "apps/validation-service/tsconfig.app.json" }
     },
     "serve": {

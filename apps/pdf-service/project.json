@@ -5,7 +5,7 @@
   "projectType": "application",
   "targets": {
     "build": {
-      "executor": "@nx/webpack:webpack",
+      "executor": "@nx/js:tsc",
       "options": { "outputPath": "dist/apps/pdf-service", "main": "apps/pdf-service/src/main.ts", "tsConfig": "apps/pdf-service/tsconfig.app.json" }
     },
     "serve": {

@@ -5,7 +5,7 @@
   "projectType": "application",
   "targets": {
     "build": {
-      "executor": "@nx/webpack:webpack",
+      "executor": "@nx/js:tsc",
       "options": { "outputPath": "dist/apps/gateway", "main": "apps/gateway/src/main.ts", "tsConfig": "apps/gateway/tsconfig.app.json" }
     },
     "serve": {
