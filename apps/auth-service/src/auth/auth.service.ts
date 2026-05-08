@@ -48,9 +48,11 @@ export class AuthService {
     if (!otpValid) throw new UnauthorizedException('Code OTP invalide');
 
     const jti = crypto.randomUUID();
-    const jwtPayload: JwtPayload = {
-      sub: user.id, role: user.role as RoleUtilisateur,
-      base_id: user.base_id, jti, iat: 0, exp: 0,
+    const jwtPayload = {
+      sub: user.id,
+      role: user.role as RoleUtilisateur,
+      base_id: user.base_id,
+      jti,
     };
 
     const accessToken  = this.jwtService.sign(jwtPayload);

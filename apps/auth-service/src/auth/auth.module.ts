@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common';
-import { JwtModule } from '@nestjs/jwt';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { LocalStrategy } from './strategies/local.strategy';
@@ -13,7 +12,6 @@ import { SessionModule } from '../session/session.module';
     UsersModule,
     OtpModule,
     SessionModule,
-    JwtModule,   // ← manquait — JwtModule est global dans AuthServiceModule mais doit être importé ici aussi
   ],
   controllers: [AuthController],
   providers: [AuthService, LocalStrategy, JwtStrategy],

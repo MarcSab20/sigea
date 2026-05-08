@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, Global } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
@@ -9,14 +9,20 @@ import { SessionModule } from './session/session.module';
 import { HealthModule } from './health/health.module';
 import authConfig from './config/auth.config';
 
+@Global()
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, load: [authConfig] }),
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
+      global: true,
       useFactory: () => ({
-        privateKey:  process.env.JWT_PRIVATE_KEY ?? '',
-        publicKey:   process.env.JWT_PUBLIC_KEY  ?? '',
+        privateKey: process.env.JWT_PRIVATE_KEY
+          ? Buffer.from(process.env.JWT_PRIVATE_KEY, 'base64').toString('utf8')
+          : '',
+        publicKey: process.env.JWT_PUBLIC_KEY
+          ? Buffer.from(process.env.JWT_PUBLIC_KEY, 'base64').toString('utf8')
+          : '',
         signOptions: { algorithm: 'RS256', expiresIn: (process.env.JWT_ACCESS_EXPIRY ?? '15m') as any },
       }),
     }),
