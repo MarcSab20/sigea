@@ -5,14 +5,13 @@ WORKDIR /app
 COPY package*.json ./
 COPY tsconfig.base.json ./
 
-# Configuration npm robuste pour réseau instable
 RUN npm config set fetch-retry-mintimeout 20000 \
     && npm config set fetch-retry-maxtimeout 120000 \
     && npm config set fetch-retries 5 \
     && npm ci --ignore-scripts
 
-# Générer Prisma sans téléchargement réseau
-# Les binaires sont déjà dans node_modules après npm ci
+RUN npm install -g tsc-alias
+
 COPY prisma ./prisma
 RUN PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING=1 \
     npx prisma generate --schema=prisma/schema.prisma
@@ -20,22 +19,26 @@ RUN PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING=1 \
 COPY apps/${SERVICE} ./apps/${SERVICE}
 COPY libs ./libs
 
-RUN npx tsc \
-    --project apps/${SERVICE}/tsconfig.app.json \
-    --rootDir . \
-    --outDir dist/apps/${SERVICE} \
-    --noEmit false
+RUN npx tsc --project apps/${SERVICE}/tsconfig.app.json --noEmit false && \
+    tsc-alias --project apps/${SERVICE}/tsconfig.app.json
 
+# ── Runner ────────────────────────────────────────────────────────────────────
 FROM node:20-alpine AS runner
 ARG SERVICE
-RUN addgroup -g 1001 -S nodejs && adduser -S sigea -u 1001
+ENV SERVICE=${SERVICE}
+
+RUN apk add --no-cache openssl && \
+    addgroup -g 1001 -S nodejs && adduser -S sigea -u 1001
+
 WORKDIR /app
-COPY --from=builder --chown=sigea:nodejs /app/dist/apps/${SERVICE} ./dist
+
+COPY --from=builder --chown=sigea:nodejs /app/dist/out-tsc ./dist
 COPY --from=builder --chown=sigea:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=sigea:nodejs /app/prisma ./prisma
-# Copier le client Prisma pré-généré (évite tout téléchargement réseau)
-COPY node_modules/.prisma ./node_modules/.prisma
-COPY node_modules/@prisma/client ./node_modules/@prisma/client
+COPY --from=builder --chown=sigea:nodejs /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder --chown=sigea:nodejs /app/node_modules/@prisma/client ./node_modules/@prisma/client
+
 USER sigea
 EXPOSE ${PORT:-3000}
-CMD ["node", "dist/src/main.js"]
+
+CMD ["sh", "-c", "node dist/apps/${SERVICE}/src/main.js"]
