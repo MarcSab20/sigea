@@ -18,6 +18,7 @@ export function useWebSocket(): void {
       reconnection: true,
       reconnectionDelay: 1000,
       reconnectionAttempts: 5,
+      path: '/notifications/socket.io',
     });
 
     socket.on('manifeste.submitted', (data: { vol_id: string }) => {
