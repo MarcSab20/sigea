@@ -11,7 +11,7 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ── Enums ──────────────────────────────────────────────────────────────────
+// ── Enums ────────────────────────────────────────────────────────────────────
 
 enum RoleUtilisateur {
   chef_escale
@@ -92,63 +92,87 @@ enum FonctionEquipage {
   AUTRE
 }
 
-// ── Modèles ────────────────────────────────────────────────────────────────
+// ── Modèles ──────────────────────────────────────────────────────────────────
 
 model Base {
-  id             String       @id @default(uuid())
-  code_base      String       @unique
+  id             String        @id @default(uuid())
+  code_base      String        @unique
   nom            String
   region         String
   admin_id       String?
-  administrateur Utilisateur? @relation("BaseAdmin", fields: [admin_id], references: [id])
+  administrateur Utilisateur?  @relation("BaseAdmin", fields: [admin_id], references: [id])
   utilisateurs   Utilisateur[]
   manifestes     Manifeste[]
-  vols_depart    Vol[]        @relation("VolDepart")
-  vols_arrivee   Vol[]        @relation("VolArrivee")
-  createdAt      DateTime     @default(now())
+  vols_depart    Vol[]         @relation("VolDepart")
+  vols_arrivee   Vol[]         @relation("VolArrivee")
+  createdAt      DateTime      @default(now())
 }
 
 model Utilisateur {
-  id            String           @id @default(uuid())
-  nom           String
-  prenom        String
-  grade         String
-  login         String           @unique
-  password_hash String
-  otp_secret    String?
-  role          RoleUtilisateur
-  base_id       String
-  base          Base             @relation(fields: [base_id], references: [id])
-  base_admin    Base[]           @relation("BaseAdmin")
-  actif         Boolean          @default(true)
-  last_login    DateTime?
-  sessions      Session[]
-  validations   ValidationEtape[]
-  audits        AuditLog[]
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
+  id              String            @id @default(uuid())
+  nom             String
+  prenom          String
+  grade           String
+  login           String            @unique
+  password_hash   String
+  role            RoleUtilisateur
+  base_id         String
+  base            Base              @relation(fields: [base_id], references: [id])
+  base_admin      Base[]            @relation("BaseAdmin")
+  actif           Boolean           @default(true)
+  last_login      DateTime?
+  sessions        Session[]
+  validations     ValidationEtape[]
+  audits          AuditLog[]
+  otp_secret      OtpSecret?
+  challenge_token ChallengeToken?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
 
   @@index([base_id, role])
 }
 
+model OtpSecret {
+  id          String      @id @default(uuid())
+  user_id     String      @unique
+  secret      String
+  actif       Boolean     @default(false)
+  created_at  DateTime    @default(now())
+  updated_at  DateTime    @updatedAt
+  utilisateur Utilisateur @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("otp_secrets")
+}
+
+model ChallengeToken {
+  id          String      @id @default(uuid())
+  user_id     String      @unique
+  token       String      @unique
+  expires_at  DateTime
+  created_at  DateTime    @default(now())
+  utilisateur Utilisateur @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("challenge_tokens")
+}
+
 model Session {
-  id            String   @id @default(uuid())
+  id             String      @id @default(uuid())
   utilisateur_id String
-  utilisateur   Utilisateur @relation(fields: [utilisateur_id], references: [id])
-  refresh_hash  String
-  expires_at    DateTime
-  createdAt     DateTime @default(now())
+  utilisateur    Utilisateur @relation(fields: [utilisateur_id], references: [id])
+  refresh_hash   String
+  expires_at     DateTime
+  createdAt      DateTime    @default(now())
 }
 
 model Aeronef {
-  id            String   @id @default(uuid())
-  immatriculation String @unique
-  type          String
-  capacite_places Int
-  capacite_cargo_kg Decimal @db.Decimal(10, 2)
-  actif         Boolean  @default(true)
-  vols          Vol[]
-  createdAt     DateTime @default(now())
+  id                String   @id @default(uuid())
+  immatriculation   String   @unique
+  type              String
+  capacite_places   Int
+  capacite_cargo_kg Decimal  @db.Decimal(10, 2)
+  actif             Boolean  @default(true)
+  vols              Vol[]
+  createdAt         DateTime @default(now())
 }
 
 model Unite {
@@ -159,54 +183,54 @@ model Unite {
 }
 
 model Vol {
-  id                String      @id @default(uuid())
-  numero_mission    String      @unique
+  id                String        @id @default(uuid())
+  numero_mission    String        @unique
   immatriculation   String
-  aeronef           Aeronef     @relation(fields: [immatriculation], references: [immatriculation])
+  aeronef           Aeronef       @relation(fields: [immatriculation], references: [immatriculation])
   date_heure        DateTime
   base_depart_id    String
-  base_depart       Base        @relation("VolDepart", fields: [base_depart_id], references: [id])
+  base_depart       Base          @relation("VolDepart", fields: [base_depart_id], references: [id])
   base_arrivee_id   String
-  base_arrivee      Base        @relation("VolArrivee", fields: [base_arrivee_id], references: [id])
+  base_arrivee      Base          @relation("VolArrivee", fields: [base_arrivee_id], references: [id])
   type_mission      TypeMission
-  flag_sensible     Boolean     @default(false)
+  flag_sensible     Boolean       @default(false)
   capacite_places   Int
-  capacite_cargo_kg Decimal     @db.Decimal(10, 2)
-  statut            String      @default("PLANIFIE")
+  capacite_cargo_kg Decimal       @db.Decimal(10, 2)
+  statut            String        @default("PLANIFIE")
   manifestes        Manifeste[]
   consignes_cemaa   ConsigneCemaa[]
-  createdAt         DateTime    @default(now())
-  updatedAt         DateTime    @updatedAt
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
 }
 
 model ConsigneCemaa {
-  id                String       @id @default(uuid())
-  vol_id            String
-  vol               Vol          @relation(fields: [vol_id], references: [id])
-  escale_base_id    String?
-  type              TypeConsigne
-  contenu_chiffre   String       // JSON EncryptedPayload
-  places_bloquees   Int          @default(0)
-  masse_bloquee_kg  Decimal      @default(0) @db.Decimal(10, 2)
-  valide_par_cemaa  String
-  date              DateTime     @default(now())
+  id               String       @id @default(uuid())
+  vol_id           String
+  vol              Vol          @relation(fields: [vol_id], references: [id])
+  escale_base_id   String?
+  type             TypeConsigne
+  contenu_chiffre  String
+  places_bloquees  Int          @default(0)
+  masse_bloquee_kg Decimal      @default(0) @db.Decimal(10, 2)
+  valide_par_cemaa String
+  date             DateTime     @default(now())
 
   @@index([vol_id])
 }
 
 model Manifeste {
-  id                  String          @id @default(uuid())
+  id                  String                  @id @default(uuid())
   vol_id              String
-  vol                 Vol             @relation(fields: [vol_id], references: [id])
+  vol                 Vol                     @relation(fields: [vol_id], references: [id])
   base_id             String
-  base                Base            @relation(fields: [base_id], references: [id])
+  base                Base                    @relation(fields: [base_id], references: [id])
   manifeste_maitre_id String?
-  manifeste_maitre    Manifeste?      @relation("ManifestHierarchy", fields: [manifeste_maitre_id], references: [id])
-  enfants             Manifeste[]     @relation("ManifestHierarchy")
-  etape_vol           String          @default("A")
-  version             Int             @default(1)
-  statut              StatutManifeste @default(BROUILLON)
-  flag_sensible       Boolean         @default(false)
+  manifeste_maitre    Manifeste?              @relation("ManifestHierarchy", fields: [manifeste_maitre_id], references: [id])
+  enfants             Manifeste[]             @relation("ManifestHierarchy")
+  etape_vol           String                  @default("A")
+  version             Int                     @default(1)
+  statut              StatutManifeste         @default(BROUILLON)
+  flag_sensible       Boolean                 @default(false)
   cree_par            String
   passagers           Passager[]
   materiels           Materiel[]
@@ -215,36 +239,36 @@ model Manifeste {
   validations         ValidationEtape[]
   alertes             AlerteEscale[]
   compte_rendu        CompteRenduCemaa?
-  createdAt           DateTime        @default(now())
-  updatedAt           DateTime        @updatedAt
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
 
   @@index([base_id, statut])
   @@index([vol_id, base_id])
 }
 
 model Passager {
-  id                    String                @id @default(uuid())
-  manifeste_id          String
-  manifeste             Manifeste             @relation(fields: [manifeste_id], references: [id], onDelete: Cascade)
-  base_id               String
-  nom                   String
-  prenom                String
-  grade                 String?
-  categorie             CategoriePassager
-  matricule             String?
-  unite                 String?
-  destination           String
-  nb_bagages            Int
-  masse_bagages_kg      Decimal               @db.Decimal(7, 2)
-  couleur_bagages       String?
-  contact_urgence_nom   String
-  contact_urgence_tel   String
-  contact_urgence_qual  String?
-  ref_autorisation      String?
-  origine               OrigineEnregistrement @default(SAISIE)
-  verrouille            Boolean               @default(false)
-  sensible              Boolean               @default(false)
-  createdAt             DateTime              @default(now())
+  id                   String                @id @default(uuid())
+  manifeste_id         String
+  manifeste            Manifeste             @relation(fields: [manifeste_id], references: [id], onDelete: Cascade)
+  base_id              String
+  nom                  String
+  prenom               String
+  grade                String?
+  categorie            CategoriePassager
+  matricule            String?
+  unite                String?
+  destination          String
+  nb_bagages           Int
+  masse_bagages_kg     Decimal               @db.Decimal(7, 2)
+  couleur_bagages      String?
+  contact_urgence_nom  String
+  contact_urgence_tel  String
+  contact_urgence_qual String?
+  ref_autorisation     String?
+  origine              OrigineEnregistrement @default(SAISIE)
+  verrouille           Boolean               @default(false)
+  sensible             Boolean               @default(false)
+  createdAt            DateTime              @default(now())
 
   @@index([manifeste_id])
   @@index([base_id])
@@ -273,26 +297,26 @@ model Materiel {
 }
 
 model MarchandiseDangereuse {
-  id             String    @id @default(uuid())
-  manifeste_id   String
-  manifeste      Manifeste @relation(fields: [manifeste_id], references: [id], onDelete: Cascade)
-  nature         String
-  classe_iata    String
-  description    String    @db.VarChar(500)
-  poids_kg       Decimal   @db.Decimal(10, 2)
-  volume         Decimal?  @db.Decimal(10, 3)
-  conditionnement String
-  destination    String
-  proprietaire   String
+  id               String    @id @default(uuid())
+  manifeste_id     String
+  manifeste        Manifeste @relation(fields: [manifeste_id], references: [id], onDelete: Cascade)
+  nature           String
+  classe_iata      String
+  description      String    @db.VarChar(500)
+  poids_kg         Decimal   @db.Decimal(10, 2)
+  volume           Decimal?  @db.Decimal(10, 3)
+  conditionnement  String
+  destination      String
+  proprietaire     String
   proprietaire_tel String
 
   @@index([manifeste_id])
 }
 
 model Equipage {
-  id           String          @id @default(uuid())
+  id           String           @id @default(uuid())
   manifeste_id String
-  manifeste    Manifeste       @relation(fields: [manifeste_id], references: [id], onDelete: Cascade)
+  manifeste    Manifeste        @relation(fields: [manifeste_id], references: [id], onDelete: Cascade)
   base_id      String
   nom          String
   prenom       String
@@ -301,29 +325,29 @@ model Equipage {
 }
 
 model ValidationEtape {
-  id           String           @id @default(uuid())
-  manifeste_id String
-  manifeste    Manifeste        @relation(fields: [manifeste_id], references: [id])
-  etape        EtapeValidation
+  id            String           @id @default(uuid())
+  manifeste_id  String
+  manifeste     Manifeste        @relation(fields: [manifeste_id], references: [id])
+  etape         EtapeValidation
   validateur_id String?
-  validateur   Utilisateur?     @relation(fields: [validateur_id], references: [id])
-  date_heure   DateTime         @default(now())
-  commentaire  String?
-  statut       StatutValidation @default(EN_ATTENTE)
+  validateur    Utilisateur?     @relation(fields: [validateur_id], references: [id])
+  date_heure    DateTime         @default(now())
+  commentaire   String?
+  statut        StatutValidation @default(EN_ATTENTE)
 
   @@unique([manifeste_id, etape], name: "manifeste_id_etape")
   @@index([manifeste_id, etape])
 }
 
 model AlerteEscale {
-  id           String    @id @default(uuid())
-  manifeste_id String
-  manifeste    Manifeste @relation(fields: [manifeste_id], references: [id])
-  type_alerte  String
+  id            String    @id @default(uuid())
+  manifeste_id  String
+  manifeste     Manifeste @relation(fields: [manifeste_id], references: [id])
+  type_alerte   String
   destinataires String[]
-  message      String
-  date_emission DateTime @default(now())
-  lu_par       String[]
+  message       String
+  date_emission DateTime  @default(now())
+  lu_par        String[]
 }
 
 model CompteRenduCemaa {
@@ -331,12 +355,12 @@ model CompteRenduCemaa {
   manifeste_id           String    @unique
   manifeste              Manifeste @relation(fields: [manifeste_id], references: [id])
   date_envoi             DateTime  @default(now())
-  pdf_chiffre            String    // chemin ou base64 du PDF chiffré
+  pdf_chiffre            String
   accuse_reception_cemaa Boolean   @default(false)
 }
 
 model AuditLog {
-  id           String   @id @default(uuid())
+  id           String      @id @default(uuid())
   user_id      String
   utilisateur  Utilisateur @relation(fields: [user_id], references: [id])
   base_id      String
@@ -346,8 +370,8 @@ model AuditLog {
   method       String?
   path         String?
   ip           String?
-  content_hash String   // SHA-256 du contenu — intégrité garantie
-  timestamp    DateTime @default(now())
+  content_hash String
+  timestamp    DateTime    @default(now())
 
   @@index([user_id, timestamp])
 }

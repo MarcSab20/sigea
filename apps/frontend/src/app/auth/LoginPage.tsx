@@ -1,283 +1,445 @@
-import React, { useState, useRef, KeyboardEvent } from 'react';
-import { Navigate } from 'react-router-dom';
+// apps/frontend/src/app/auth/LoginPage.tsx
+import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/stores/auth.store';
-import { useLogin } from '@/hooks/useLogin';
+import { api } from '@/lib/api';
 
-const C = {
-  bg: '#060e1a', card: '#0d1e36', cardBorder: '#1a3050',
-  input: '#0a1628', inputBorder: '#1e3a5f', inputFocus: '#4a7fbf',
-  blue: '#4a7fbf', blueDim: '#1a3a6b', blueText: '#7a9cc4',
-  text: '#e8edf5', textDim: '#4a6b8a', textMuted: '#2d4d6e', green: '#1a6b3a',
+type Step = 'CREDENTIALS' | 'MFA_SETUP' | 'MFA_VERIFY';
+
+interface MfaSetupData {
+  secret: string;
+  qr_url: string;
+  otp_auth_url: string;
+}
+
+const T = {
+  bg: '#f4f1ec', card: '#ffffff', green: '#2d6a4f', greenBg: '#d8f3dc',
+  greenBorder: '#95d5b2', red: '#8b1a1a', redBg: '#fde8e8', redBorder: '#f5b8b8',
+  blue: '#1e3a5f', amber: '#92400e', amberBg: '#fef3c7', amberBorder: '#fcd34d',
+  text: '#1a1a1a', textSub: '#4a4540', textDim: '#8a857a', border: '#d4cfc5',
+  input: '#faf8f5', mono: "'Source Code Pro', monospace",
+  display: "'Rajdhani', 'Arial Narrow', sans-serif",
 };
 
-function IconShield(): React.ReactElement {
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} width={28} height={28}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
-  </svg>;
-}
-function IconUser(): React.ReactElement {
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} width={15} height={15}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
-  </svg>;
-}
-function IconLock(): React.ReactElement {
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} width={15} height={15}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
-  </svg>;
-}
-function IconEye({ show }: { show: boolean }): React.ReactElement {
-  return show ? (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} width={15} height={15}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
-    </svg>
-  ) : (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} width={15} height={15}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-    </svg>
-  );
-}
-function Spinner(): React.ReactElement {
-  return <svg viewBox="0 0 24 24" fill="none" width={14} height={14} style={{ animation: 'spin 1s linear infinite' }}>
-    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" style={{ opacity: 0.25 }} />
-    <path fill="currentColor" style={{ opacity: 0.75 }} d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-  </svg>;
-}
+// ─── Composant saisie OTP 6 cases ─────────────────────────────────────────────
+function OtpInput({ value, onChange, disabled }: {
+  value: string; onChange: (v: string) => void; disabled?: boolean;
+}): React.ReactElement {
+  const inputs = useRef<(HTMLInputElement | null)[]>([]);
 
-function OtpInput({ onComplete, isLoading }: { onComplete: (v: string) => void; isLoading: boolean }): React.ReactElement {
-  const [digits, setDigits] = useState<string[]>(Array(6).fill(''));
-  const refs = useRef<(HTMLInputElement | null)[]>([]);
-  const handleChange = (i: number, val: string): void => {
-    const d = val.replace(/\D/g, '').slice(-1);
-    const next = [...digits]; next[i] = d; setDigits(next);
-    if (d && i < 5) refs.current[i + 1]?.focus();
-    if (next.every(x => x)) onComplete(next.join(''));
+  const digits = value.split('').concat(Array(6).fill('')).slice(0, 6);
+
+  const handleChange = (i: number, v: string): void => {
+    const clean = v.replace(/\D/g, '').slice(-1);
+    const next = [...digits];
+    next[i] = clean;
+    onChange(next.join(''));
+    if (clean && i < 5) inputs.current[i + 1]?.focus();
   };
-  const handleKeyDown = (i: number, e: KeyboardEvent<HTMLInputElement>): void => {
-    if (e.key === 'Backspace' && !digits[i] && i > 0) refs.current[i - 1]?.focus();
-    if (e.key === 'ArrowLeft' && i > 0) refs.current[i - 1]?.focus();
-    if (e.key === 'ArrowRight' && i < 5) refs.current[i + 1]?.focus();
+
+  const handleKeyDown = (i: number, e: React.KeyboardEvent): void => {
+    if (e.key === 'Backspace' && !digits[i] && i > 0) {
+      inputs.current[i - 1]?.focus();
+    }
+    if (e.key === 'ArrowLeft' && i > 0) inputs.current[i - 1]?.focus();
+    if (e.key === 'ArrowRight' && i < 5) inputs.current[i + 1]?.focus();
   };
+
   const handlePaste = (e: React.ClipboardEvent): void => {
     e.preventDefault();
-    const text = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
-    if (text.length === 6) { setDigits(text.split('')); onComplete(text); }
+    const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
+    onChange(pasted.padEnd(6, '').slice(0, 6));
+    const focusIdx = Math.min(pasted.length, 5);
+    inputs.current[focusIdx]?.focus();
   };
+
   return (
-    <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginBottom: 24 }} onPaste={handlePaste}>
-      {digits.map((digit, i) => (
-        <input key={i} ref={el => { refs.current[i] = el; }}
-          type="text" inputMode="numeric" maxLength={1} value={digit} disabled={isLoading}
+    <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+      {digits.map((d, i) => (
+        <input key={i}
+          ref={el => { inputs.current[i] = el; }}
+          type="text" inputMode="numeric" maxLength={1}
+          value={d} disabled={disabled}
           onChange={e => handleChange(i, e.target.value)}
           onKeyDown={e => handleKeyDown(i, e)}
+          onPaste={handlePaste}
+          onFocus={e => e.target.select()}
           style={{
-            width: 44, height: 56, textAlign: 'center', fontSize: 20, fontWeight: 700,
-            fontFamily: "'Share Tech Mono', monospace", background: C.input,
-            border: `2px solid ${digit ? C.blue : C.inputBorder}`, borderRadius: 4,
-            color: C.text, outline: 'none', boxSizing: 'border-box',
-            boxShadow: digit ? '0 0 12px rgba(74,127,191,0.3)' : 'none',
-            transition: 'border-color 0.15s, box-shadow 0.15s',
-          }}
-        />
+            width: 48, height: 56, textAlign: 'center',
+            fontSize: 22, fontWeight: 700, fontFamily: T.mono,
+            background: d ? T.greenBg : T.input,
+            border: `2px solid ${d ? T.greenBorder : T.border}`,
+            borderRadius: 8, color: T.text, outline: 'none',
+            transition: 'all 0.15s',
+            boxShadow: d ? `0 0 0 3px ${T.green}15` : 'none',
+          }} />
       ))}
     </div>
   );
 }
 
+// ─── Page Login principale ────────────────────────────────────────────────────
 export default function LoginPage(): React.ReactElement {
-  const { user } = useAuthStore();
-  const { step, isLoading, submitCredentials, submitOtp, backToCredentials } = useLogin();
+  const navigate = useNavigate();
+  const { setUser, setToken } = useAuthStore();
+
+  const [step, setStep] = useState<Step>('CREDENTIALS');
+  const [challengeToken, setChallengeToken] = useState('');
+  const [mfaSetup, setMfaSetup] = useState<MfaSetupData | null>(null);
+
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
-  const [showPwd, setShowPwd] = useState(false);
-  const [focus, setFocus] = useState<string | null>(null);
+  const [otpCode, setOtpCode] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
 
-  if (user) return <Navigate to="/" replace />;
+  // Auto-submit quand 6 chiffres saisis
+  useEffect(() => {
+    if (otpCode.length === 6 && !loading) {
+      if (step === 'MFA_SETUP') handleActivateOtp();
+      else if (step === 'MFA_VERIFY') handleVerifyOtp();
+    }
+  }, [otpCode]);
 
-  const handleSubmit = (e: React.FormEvent): void => {
-    e.preventDefault();
-    if (login.trim() && password) submitCredentials(login.trim(), password);
+  // ── Étape 1 : identifiants ──────────────────────────────────────────────────
+  const handleLogin = async (): Promise<void> => {
+    if (!login || !password) { setError('Remplissez tous les champs'); return; }
+    setError('');
+    setLoading(true);
+    try {
+      const { data } = await api.post('/auth/login', { login, password });
+
+      if (data.step === 'MFA_SETUP') {
+        setChallengeToken(data.challenge_token);
+        setMfaSetup(data.mfa_setup);
+        setStep('MFA_SETUP');
+      } else if (data.step === 'MFA_VERIFY') {
+        setChallengeToken(data.challenge_token);
+        setStep('MFA_VERIFY');
+      } else if (data.step === 'COMPLETE') {
+        // Connexion sans MFA (cas legacy)
+        finalizeLogin(data);
+      }
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      setError(msg ?? 'Identifiants incorrects');
+    } finally { setLoading(false); }
   };
 
-  const inp = (name: string, extra: React.CSSProperties = {}): React.CSSProperties => ({
-    width: '100%', paddingLeft: 36, paddingRight: 16, paddingTop: 12, paddingBottom: 12,
-    borderRadius: 4, background: C.input, color: C.text, fontSize: 13, outline: 'none',
-    fontFamily: "'Share Tech Mono', monospace", letterSpacing: '0.05em', boxSizing: 'border-box',
-    border: `1px solid ${focus === name ? C.inputFocus : C.inputBorder}`,
-    boxShadow: focus === name ? '0 0 0 3px rgba(74,127,191,0.15)' : 'none',
-    transition: 'border-color 0.2s, box-shadow 0.2s', ...extra,
-  });
+  // ── Étape 2b : activation MFA (première connexion) ─────────────────────────
+  const handleActivateOtp = async (): Promise<void> => {
+    if (otpCode.length !== 6) return;
+    setError('');
+    setLoading(true);
+    try {
+      const { data } = await api.post('/auth/activate-otp', {
+        challenge_token: challengeToken,
+        otp_code: otpCode,
+      });
+      finalizeLogin(data);
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      setError(msg ?? 'Code OTP invalide');
+      setOtpCode('');
+    } finally { setLoading(false); }
+  };
+
+  // ── Étape 2a : vérification MFA (connexions suivantes) ─────────────────────
+  const handleVerifyOtp = async (): Promise<void> => {
+    if (otpCode.length !== 6) return;
+    setError('');
+    setLoading(true);
+    try {
+      const { data } = await api.post('/auth/verify-otp', {
+        challenge_token: challengeToken,
+        otp_code: otpCode,
+      });
+      finalizeLogin(data);
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      setError(msg ?? 'Code OTP invalide ou expiré');
+      setOtpCode('');
+    } finally { setLoading(false); }
+  };
+
+  const finalizeLogin = (data: {
+    access_token: string; refresh_token: string;
+    user: { id: string; role: string; base_id: string; nom: string; prenom: string; grade: string };
+  }): void => {
+    setToken(data.access_token, data.refresh_token);
+    setUser(data.user);
+    navigate('/', { replace: true });
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent): void => {
+    if (e.key === 'Enter') {
+      if (step === 'CREDENTIALS') handleLogin();
+    }
+  };
+
+  const goBack = (): void => {
+    setStep('CREDENTIALS');
+    setOtpCode('');
+    setError('');
+    setChallengeToken('');
+    setMfaSetup(null);
+  };
 
   return (
-    <div style={{
-      minHeight: '100vh', background: C.bg, display: 'flex', alignItems: 'center',
-      justifyContent: 'center', padding: 16, position: 'relative', overflow: 'hidden',
-      fontFamily: "'Barlow', sans-serif",
-    }}>
+    <div style={{ minHeight: '100vh', background: T.bg, display: 'flex',
+      alignItems: 'center', justifyContent: 'center', padding: 20,
+      fontFamily: "'Inter', 'Segoe UI', sans-serif" }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow:wght@400;500;600;700&display=swap');
-        @keyframes spin { to { transform: rotate(360deg); } }
+        @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Source+Code+Pro:wght@400;500&family=Inter:wght@400;500;600&display=swap');
+        * { box-sizing: border-box; }
+        @keyframes fadeIn { from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)} }
         @keyframes pulse { 0%,100%{opacity:1}50%{opacity:0.4} }
-        @keyframes fadeIn { from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)} }
-        @keyframes scan { 0%{top:-2px}100%{top:100%} }
-        input::placeholder { color: #2d4d6e; }
-        input:disabled, button:disabled { opacity: 0.5; cursor: not-allowed; }
+        input:focus { outline: none; }
       `}</style>
 
-      {/* Grille */}
-      <div style={{ position: 'absolute', inset: 0, opacity: 0.04, pointerEvents: 'none',
-        backgroundImage: `linear-gradient(rgba(74,127,191,0.8) 1px,transparent 1px),linear-gradient(90deg,rgba(74,127,191,0.8) 1px,transparent 1px)`,
-        backgroundSize: '40px 40px' }} />
-      {/* Halo */}
-      <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
-        width: 600, height: 600, borderRadius: '50%', opacity: 0.06, pointerEvents: 'none',
-        background: 'radial-gradient(circle, #1a4a8a 0%, transparent 70%)' }} />
-      {/* Scan */}
-      <div style={{ position: 'absolute', width: '100%', height: 1, pointerEvents: 'none',
-        background: 'linear-gradient(90deg,transparent,rgba(74,127,191,0.4),transparent)',
-        opacity: 0.3, animation: 'scan 8s linear infinite' }} />
+      <div style={{ width: '100%', maxWidth: 440,
+        animation: 'fadeIn 0.4s ease forwards' }}>
 
-      {/* Carte */}
-      <div style={{
-        position: 'relative', width: '100%', maxWidth: 380,
-        background: 'linear-gradient(160deg, #0d1e36 0%, #091525 100%)',
-        border: `1px solid ${C.cardBorder}`, borderRadius: 8,
-        boxShadow: '0 25px 60px rgba(0,0,0,0.6), 0 0 0 1px rgba(74,127,191,0.08)',
-        overflow: 'hidden', animation: 'fadeIn 0.4s ease forwards',
-      }}>
-        {/* Trait haut */}
-        <div style={{ position: 'absolute', top: 0, left: 32, right: 32, height: 1,
-          background: 'linear-gradient(90deg,transparent,rgba(74,127,191,0.6),transparent)' }} />
-
-        {/* Header */}
-        <div style={{ padding: '32px 32px 24px', borderBottom: '1px solid #0f2040' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-            <div style={{ padding: 8, background: C.input, border: `1px solid ${C.inputBorder}`,
-              borderRadius: 6, color: C.blue, display: 'flex' }}>
-              <IconShield />
-            </div>
-            <div>
-              <div style={{ fontSize: 11, letterSpacing: '0.3em', color: C.blue, textTransform: 'uppercase',
-                fontWeight: 600, fontFamily: "'Share Tech Mono', monospace" }}>FAC · SIGEA</div>
-              <div style={{ fontSize: 10, letterSpacing: '0.15em', color: C.textMuted,
-                textTransform: 'uppercase', marginTop: 2 }}>Système de Gestion des Escales Aériennes</div>
-            </div>
+        {/* Logo */}
+        <div style={{ textAlign: 'center', marginBottom: 32 }}>
+          <div style={{ width: 64, height: 64, background: T.green, borderRadius: 16,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 30, marginBottom: 16, boxShadow: `0 8px 24px ${T.green}40` }}>
+            ✈
           </div>
-          {/* Étapes */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 16 }}>
-            {(['credentials', 'otp'] as const).map((s, idx) => {
-              const active = step === s;
-              const done = s === 'credentials' && step === 'otp';
-              return (
-                <React.Fragment key={s}>
-                  {idx > 0 && <div style={{ flex: 1, height: 1, background: '#1a3050' }} />}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11,
-                    letterSpacing: '0.1em', textTransform: 'uppercase',
-                    color: active ? C.blue : '#1e3a5f', transition: 'color 0.2s' }}>
-                    <span style={{ width: 20, height: 20, borderRadius: '50%', fontSize: 10, fontWeight: 700,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      border: `1px solid ${active ? C.blue : '#1e3a5f'}`,
-                      color: active ? C.blue : '#1e3a5f',
-                      background: done ? C.blueDim : 'transparent', transition: 'all 0.2s' }}>
-                      {done ? '✓' : idx + 1}
-                    </span>
-                    {s === 'credentials' ? 'Identifiants' : 'Code OTP'}
-                  </div>
-                </React.Fragment>
-              );
-            })}
+          <div style={{ fontSize: 26, fontWeight: 700, color: T.text,
+            fontFamily: T.display, letterSpacing: '0.1em' }}>SIGEA</div>
+          <div style={{ fontSize: 11, color: T.textDim, letterSpacing: '0.2em',
+            textTransform: 'uppercase', marginTop: 4 }}>
+            Forces Aériennes du Cameroun
           </div>
         </div>
 
-        {/* Body */}
-        <div style={{ padding: '28px 32px' }}>
-          {step === 'credentials' && (
-            <div style={{ animation: 'fadeIn 0.3s ease forwards' }}>
-              <p style={{ fontSize: 12, color: C.textDim, lineHeight: 1.6, marginBottom: 24, marginTop: 0 }}>
-                Accès réservé au personnel autorisé.<br />
-                Toute tentative non autorisée est enregistrée.
-              </p>
-              <form onSubmit={handleSubmit}>
-                {/* Login */}
-                <div style={{ marginBottom: 20 }}>
-                  <label style={{ display: 'block', fontSize: 11, fontWeight: 600, letterSpacing: '0.2em',
-                    color: C.blueText, textTransform: 'uppercase', marginBottom: 6 }}>Identifiant</label>
-                  <div style={{ position: 'relative' }}>
-                    <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)',
-                      color: C.textDim, display: 'flex' }}><IconUser /></span>
-                    <input type="text" value={login} autoFocus placeholder="nom.prenom.base"
-                      onChange={e => setLogin(e.target.value)} disabled={isLoading}
-                      onFocus={() => setFocus('login')} onBlur={() => setFocus(null)}
-                      style={inp('login')} autoComplete="username" />
-                  </div>
-                </div>
-                {/* Password */}
-                <div style={{ marginBottom: 20 }}>
-                  <label style={{ display: 'block', fontSize: 11, fontWeight: 600, letterSpacing: '0.2em',
-                    color: C.blueText, textTransform: 'uppercase', marginBottom: 6 }}>Mot de passe</label>
-                  <div style={{ position: 'relative' }}>
-                    <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)',
-                      color: C.textDim, display: 'flex' }}><IconLock /></span>
-                    <input type={showPwd ? 'text' : 'password'} value={password} placeholder="••••••••••••"
-                      onChange={e => setPassword(e.target.value)} disabled={isLoading}
-                      onFocus={() => setFocus('password')} onBlur={() => setFocus(null)}
-                      style={inp('password', { paddingRight: 40 })} autoComplete="current-password" />
-                    <button type="button" onClick={() => setShowPwd(v => !v)} style={{
-                      position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
-                      background: 'none', border: 'none', cursor: 'pointer', color: C.textDim, padding: 0, display: 'flex' }}>
-                      <IconEye show={showPwd} />
-                    </button>
-                  </div>
-                </div>
-                <button type="submit" disabled={isLoading || !login.trim() || !password} style={{
-                  width: '100%', padding: '12px 16px', borderRadius: 4, background: C.blueDim,
-                  border: '1px solid #2d5a9e', color: '#c8d8f0', fontSize: 12, fontWeight: 600,
-                  letterSpacing: '0.2em', textTransform: 'uppercase', cursor: 'pointer',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                  boxSizing: 'border-box', transition: 'all 0.2s', marginTop: 4,
-                }}>
-                  {isLoading ? <><Spinner /> Authentification…</> : 'Accéder au système'}
-                </button>
-              </form>
-            </div>
-          )}
+        <div style={{ background: T.card, borderRadius: 12, padding: '32px 36px',
+          border: `1px solid ${T.border}`,
+          boxShadow: '0 4px 24px rgba(0,0,0,0.08)' }}>
 
-          {step === 'otp' && (
-            <div style={{ animation: 'fadeIn 0.3s ease forwards' }}>
-              <div style={{ textAlign: 'center', marginBottom: 24 }}>
-                <p style={{ color: C.blueText, fontSize: 13, marginBottom: 6, marginTop: 0 }}>
-                  Vérification à deux facteurs
-                </p>
-                <p style={{ fontSize: 12, color: C.textDim, lineHeight: 1.6, margin: 0 }}>
-                  Saisissez le code à 6 chiffres généré par votre application d'authentification.
-                </p>
+          {/* ── ÉTAPE 1 : Identifiants ────────────────────────────────────── */}
+          {step === 'CREDENTIALS' && (
+            <>
+              <div style={{ marginBottom: 24 }}>
+                <div style={{ fontSize: 18, fontWeight: 700, color: T.text, marginBottom: 4 }}>
+                  Connexion
+                </div>
+                <div style={{ fontSize: 12, color: T.textDim }}>
+                  Accès réservé au personnel autorisé FAC
+                </div>
               </div>
-              <OtpInput onComplete={submitOtp} isLoading={isLoading} />
-              {isLoading && (
-                <div style={{ textAlign: 'center', marginBottom: 12, color: C.blue, fontSize: 11,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                  <Spinner /> Vérification en cours…
+
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: 'block', fontSize: 11, fontWeight: 600,
+                  color: T.textSub, marginBottom: 6, textTransform: 'uppercase',
+                  letterSpacing: '0.08em' }}>Identifiant</label>
+                <input value={login} onChange={e => setLogin(e.target.value)}
+                  onKeyDown={handleKeyDown} autoFocus
+                  placeholder="nom.prenom.base"
+                  style={{ width: '100%', padding: '11px 14px', background: T.input,
+                    border: `1px solid ${T.border}`, borderRadius: 8, color: T.text,
+                    fontSize: 14, fontFamily: T.mono, transition: 'border-color 0.2s' }} />
+              </div>
+
+              <div style={{ marginBottom: 20 }}>
+                <label style={{ display: 'block', fontSize: 11, fontWeight: 600,
+                  color: T.textSub, marginBottom: 6, textTransform: 'uppercase',
+                  letterSpacing: '0.08em' }}>Mot de passe</label>
+                <div style={{ position: 'relative' }}>
+                  <input value={password} onChange={e => setPassword(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    type={showPassword ? 'text' : 'password'}
+                    placeholder="••••••••••••"
+                    style={{ width: '100%', padding: '11px 44px 11px 14px', background: T.input,
+                      border: `1px solid ${T.border}`, borderRadius: 8, color: T.text,
+                      fontSize: 14, fontFamily: T.mono, transition: 'border-color 0.2s' }} />
+                  <button onClick={() => setShowPassword(v => !v)}
+                    style={{ position: 'absolute', right: 12, top: '50%',
+                      transform: 'translateY(-50%)', background: 'none',
+                      border: 'none', cursor: 'pointer', fontSize: 16,
+                      color: T.textDim, padding: '2px 4px' }}>
+                    {showPassword ? '🙈' : '👁'}
+                  </button>
+                </div>
+              </div>
+
+              {error && (
+                <div style={{ padding: '10px 14px', background: T.redBg,
+                  border: `1px solid ${T.redBorder}`, borderRadius: 6,
+                  fontSize: 12, color: T.red, marginBottom: 16 }}>
+                  {error}
                 </div>
               )}
-              <button onClick={backToCredentials} disabled={isLoading} style={{
-                width: '100%', padding: '8px 16px', background: 'transparent', border: 'none',
-                color: C.textDim, fontSize: 11, letterSpacing: '0.15em', textTransform: 'uppercase',
-                cursor: 'pointer', marginTop: 12, boxSizing: 'border-box',
-              }}>← Retour aux identifiants</button>
-            </div>
+
+              <button onClick={handleLogin} disabled={loading || !login || !password}
+                style={{ width: '100%', padding: '13px', background: (!login || !password) ? '#aaa' : T.green,
+                  border: 'none', borderRadius: 8, color: '#fff', fontSize: 14,
+                  fontWeight: 700, cursor: loading ? 'wait' : (!login || !password) ? 'not-allowed' : 'pointer',
+                  letterSpacing: '0.05em', transition: 'all 0.2s',
+                  opacity: (!login || !password) ? 0.6 : 1 }}>
+                {loading ? '⏳ Vérification…' : 'Connexion →'}
+              </button>
+            </>
+          )}
+
+          {/* ── ÉTAPE 2a : Setup MFA (première connexion) ─────────────────── */}
+          {step === 'MFA_SETUP' && mfaSetup && (
+            <>
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ fontSize: 16, fontWeight: 700, color: T.text, marginBottom: 4,
+                  display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 20 }}>🔐</span>
+                  Configuration MFA
+                </div>
+                <div style={{ fontSize: 12, color: T.textDim }}>
+                  Première connexion — configurez votre authentificateur
+                </div>
+              </div>
+
+              {/* Instructions */}
+              <div style={{ padding: '12px 14px', background: T.amberBg,
+                border: `1px solid ${T.amberBorder}`, borderRadius: 8, marginBottom: 20,
+                fontSize: 12, color: T.amber, lineHeight: 1.7 }}>
+                <strong>Étapes à suivre :</strong><br />
+                1. Ouvrez <strong>Google Authenticator</strong>, <strong>Authy</strong> ou <strong>Microsoft Authenticator</strong><br />
+                2. Scannez le QR code ci-dessous<br />
+                3. Saisissez le code à 6 chiffres affiché
+              </div>
+
+              {/* QR Code */}
+              <div style={{ textAlign: 'center', marginBottom: 16 }}>
+                <div style={{ display: 'inline-block', padding: 12, background: '#fff',
+                  border: `2px solid ${T.border}`, borderRadius: 12,
+                  boxShadow: '0 2px 12px rgba(0,0,0,0.08)' }}>
+                  <img src={mfaSetup.qr_url} alt="QR Code MFA"
+                    width={180} height={180}
+                    style={{ display: 'block', borderRadius: 4 }}
+                    onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                </div>
+              </div>
+
+              {/* Secret manuel (fallback) */}
+              <details style={{ marginBottom: 20 }}>
+                <summary style={{ fontSize: 11, color: T.textDim, cursor: 'pointer',
+                  textAlign: 'center', marginBottom: 8 }}>
+                  Impossible de scanner ? Saisir le code manuellement
+                </summary>
+                <div style={{ padding: '10px 14px', background: '#f8f8f8',
+                  border: `1px solid ${T.border}`, borderRadius: 6,
+                  textAlign: 'center' }}>
+                  <div style={{ fontSize: 10, color: T.textDim, marginBottom: 6 }}>
+                    Clé secrète (Base32)
+                  </div>
+                  <div style={{ fontSize: 14, fontFamily: T.mono, fontWeight: 600,
+                    color: T.text, letterSpacing: '0.15em', wordBreak: 'break-all' }}>
+                    {mfaSetup.secret.match(/.{1,4}/g)?.join(' ')}
+                  </div>
+                  <div style={{ fontSize: 10, color: T.textDim, marginTop: 6 }}>
+                    Type : TOTP · Algorithme : SHA-1 · Période : 30s · Digits : 6
+                  </div>
+                </div>
+              </details>
+
+              {/* Saisie OTP */}
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: T.textSub,
+                  textAlign: 'center', marginBottom: 12, textTransform: 'uppercase',
+                  letterSpacing: '0.08em' }}>
+                  Code de confirmation
+                </div>
+                <OtpInput value={otpCode} onChange={setOtpCode} disabled={loading} />
+              </div>
+
+              {error && (
+                <div style={{ padding: '10px 14px', background: T.redBg,
+                  border: `1px solid ${T.redBorder}`, borderRadius: 6,
+                  fontSize: 12, color: T.red, marginBottom: 16, textAlign: 'center' }}>
+                  {error}
+                </div>
+              )}
+
+              <button onClick={handleActivateOtp}
+                disabled={loading || otpCode.length !== 6}
+                style={{ width: '100%', padding: '13px',
+                  background: otpCode.length === 6 ? T.green : '#aaa',
+                  border: 'none', borderRadius: 8, color: '#fff', fontSize: 14,
+                  fontWeight: 700, cursor: loading ? 'wait' : otpCode.length !== 6 ? 'not-allowed' : 'pointer',
+                  opacity: otpCode.length !== 6 ? 0.6 : 1, marginBottom: 10 }}>
+                {loading ? '⏳ Activation…' : '✓ Activer et accéder'}
+              </button>
+
+              <button onClick={goBack} style={{ width: '100%', padding: '10px',
+                background: 'transparent', border: `1px solid ${T.border}`,
+                borderRadius: 8, color: T.textDim, fontSize: 13, cursor: 'pointer' }}>
+                ← Retour
+              </button>
+            </>
+          )}
+
+          {/* ── ÉTAPE 2b : Vérification MFA (connexions suivantes) ────────── */}
+          {step === 'MFA_VERIFY' && (
+            <>
+              <div style={{ marginBottom: 24, textAlign: 'center' }}>
+                <div style={{ fontSize: 40, marginBottom: 12 }}>🔒</div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: T.text, marginBottom: 4 }}>
+                  Vérification MFA
+                </div>
+                <div style={{ fontSize: 12, color: T.textDim, lineHeight: 1.6 }}>
+                  Ouvrez votre application d'authentification<br />
+                  et saisissez le code à 6 chiffres
+                </div>
+              </div>
+
+              {/* Indicateur de temps */}
+              <div style={{ marginBottom: 20, textAlign: 'center' }}>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6,
+                  padding: '5px 12px', background: T.greenBg,
+                  border: `1px solid ${T.greenBorder}`, borderRadius: 20,
+                  fontSize: 11, color: T.green }}>
+                  <span style={{ width: 6, height: 6, borderRadius: '50%',
+                    background: T.green, display: 'inline-block',
+                    animation: 'pulse 1s infinite' }} />
+                  Code valide 30 secondes
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 20 }}>
+                <OtpInput value={otpCode} onChange={setOtpCode} disabled={loading} />
+              </div>
+
+              {error && (
+                <div style={{ padding: '10px 14px', background: T.redBg,
+                  border: `1px solid ${T.redBorder}`, borderRadius: 6,
+                  fontSize: 12, color: T.red, marginBottom: 16, textAlign: 'center' }}>
+                  {error}
+                </div>
+              )}
+
+              <button onClick={handleVerifyOtp}
+                disabled={loading || otpCode.length !== 6}
+                style={{ width: '100%', padding: '13px',
+                  background: otpCode.length === 6 ? T.green : '#aaa',
+                  border: 'none', borderRadius: 8, color: '#fff', fontSize: 14,
+                  fontWeight: 700, cursor: loading ? 'wait' : otpCode.length !== 6 ? 'not-allowed' : 'pointer',
+                  opacity: otpCode.length !== 6 ? 0.6 : 1, marginBottom: 10 }}>
+                {loading ? '⏳ Vérification…' : '→ Accéder'}
+              </button>
+
+              <button onClick={goBack} style={{ width: '100%', padding: '10px',
+                background: 'transparent', border: `1px solid ${T.border}`,
+                borderRadius: 8, color: T.textDim, fontSize: 13, cursor: 'pointer' }}>
+                ← Utiliser un autre compte
+              </button>
+            </>
           )}
         </div>
 
         {/* Footer */}
-        <div style={{ padding: '0 32px 24px', display: 'flex', justifyContent: 'space-between',
-          alignItems: 'center', fontSize: 10, color: '#1e3a5f', letterSpacing: '0.1em',
-          textTransform: 'uppercase', fontFamily: "'Share Tech Mono', monospace" }}>
-          <span>CONFIDENTIEL · INTRANET FAC</span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ width: 6, height: 6, borderRadius: '50%', background: C.green,
-              display: 'inline-block', animation: 'pulse 2s infinite' }} />
-            SYS OPÉRATIONNEL
-          </span>
+        <div style={{ textAlign: 'center', marginTop: 20, fontSize: 11, color: T.textDim }}>
+          SIGEA v1.0 · FAC/DSIC · Accès réservé
         </div>
       </div>
     </div>

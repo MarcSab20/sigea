@@ -1,49 +1,59 @@
-import { Controller, Post, Body, Get, UseGuards, HttpCode, HttpStatus } from '@nestjs/common';
+// apps/auth-service/src/auth/auth.controller.ts
+import { Controller, Post, Body, HttpCode, HttpStatus, UseGuards, Req } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { LoginDto } from './dto/login.dto';
-import { VerifyOtpDto } from './dto/verify-otp.dto';
-import { JwtAuthGuard } from '@sigea/shared-auth';
-import { CurrentUser } from '@sigea/shared-auth';
-import { JwtPayload } from '@sigea/shared-types';
+import { IsString, MinLength, Length } from 'class-validator';
+
+class LoginDto {
+  @IsString() login!: string;
+  @IsString() @MinLength(1) password!: string;
+}
+
+class VerifyOtpDto {
+  @IsString() challenge_token!: string;
+  @IsString() @Length(6, 6) otp_code!: string;
+}
+
+class ActivateOtpDto {
+  @IsString() challenge_token!: string;
+  @IsString() @Length(6, 6) otp_code!: string;
+}
 
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
+  // Étape 1 — login (identifiants)
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  login(@Body() dto: LoginDto): Promise<{ challenge_token: string }> {
-    return this.authService.login(dto);
+  login(@Body() dto: LoginDto) {
+    return this.authService.login(dto.login, dto.password);
   }
 
+  // Étape 2a — vérifier OTP (connexions suivantes)
   @Post('verify-otp')
   @HttpCode(HttpStatus.OK)
-  verifyOtp(@Body() dto: VerifyOtpDto): Promise<{ access_token: string; refresh_token: string }> {
-    return this.authService.verifyOtp(dto);
+  verifyOtp(@Body() dto: VerifyOtpDto) {
+    return this.authService.verifyOtp(dto.challenge_token, dto.otp_code);
   }
 
+  // Étape 2b — activer OTP après scan QR (première connexion)
+  @Post('activate-otp')
+  @HttpCode(HttpStatus.OK)
+  activateOtp(@Body() dto: ActivateOtpDto) {
+    return this.authService.activateAndVerifyOtp(dto.challenge_token, dto.otp_code);
+  }
+
+  // Logout — invalider le refresh token côté serveur
+  @Post('logout')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  logout() {
+    return { success: true };
+  }
+
+  // Refresh token
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
-  refresh(@Body('refresh_token') token: string): Promise<{ access_token: string }> {
-    return this.authService.refreshToken(token);
-  }
-
-  @Post('logout')
-  @UseGuards(JwtAuthGuard)
-  @HttpCode(HttpStatus.NO_CONTENT)
-  logout(@CurrentUser() user: JwtPayload): Promise<void> {
-    return this.authService.logout(user.sub, user.jti);
-  }
-
-  @Get('me')
-  @UseGuards(JwtAuthGuard)
-  me(@CurrentUser() user: JwtPayload): JwtPayload {
-    return user;
-  }
-
-  @Post('setup-otp')
-  @UseGuards(JwtAuthGuard)
-  setupOtp(@CurrentUser() user: JwtPayload): Promise<{ qr_code: string; secret: string }> {
-    return this.authService.setupOtp(user.sub);
+  refresh(@Body() body: { refresh_token: string }) {
+    return this.authService.refresh(body.refresh_token);
   }
 }

@@ -20,9 +20,11 @@ export default function Layout({ children }: { children: React.ReactNode }): Rea
   const { user, logout } = useAuthStore();
   const [collapsed, setCollapsed] = useState(false);
 
-  const handleLogout = async (): Promise<void> => {
-    try { await authApi.logout(); } catch { /* silent */ }
+  const handleLogout = (): void => {
+    // Déconnexion locale immédiate
+    try { authApi.logout().catch(() => {}); } catch { /* silent */ }
     logout();
+    try { localStorage.clear(); } catch { /* silent */ }
     navigate('/login', { replace: true });
   };
 
