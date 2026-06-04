@@ -129,6 +129,7 @@ services:
       PORT: 3002
       DATABASE_URL: postgresql://sigea_app:${DB_PASSWORD}@postgres:5432/sigea
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
     depends_on:
       postgres: { condition: service_healthy }
       redis:    { condition: service_healthy }
@@ -146,6 +147,7 @@ services:
       DATABASE_URL: postgresql://sigea_app:${DB_PASSWORD}@postgres:5432/sigea
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       RABBITMQ_URL: amqp://sigea:${RABBIT_PASSWORD}@rabbitmq:5672
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
     depends_on:
       postgres: { condition: service_healthy }
 
@@ -163,6 +165,7 @@ services:
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       RABBITMQ_URL: amqp://sigea:${RABBIT_PASSWORD}@rabbitmq:5672
       CEMAA_ENCRYPTION_KEY: ${CEMAA_ENCRYPTION_KEY}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
     depends_on:
       postgres: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
@@ -179,6 +182,7 @@ services:
       PORT: 3005
       DATABASE_URL: postgresql://sigea_app:${DB_PASSWORD}@postgres:5432/sigea
       RABBITMQ_URL: amqp://sigea:${RABBIT_PASSWORD}@rabbitmq:5672
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
     depends_on:
       postgres: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
@@ -197,6 +201,7 @@ services:
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       RABBITMQ_URL: amqp://sigea:${RABBIT_PASSWORD}@rabbitmq:5672
       CEMAA_ENCRYPTION_KEY: ${CEMAA_ENCRYPTION_KEY}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
     depends_on:
       postgres: { condition: service_healthy }
 
@@ -228,6 +233,7 @@ services:
       DATABASE_URL: postgresql://sigea_app:${DB_PASSWORD}@postgres:5432/sigea
       RABBITMQ_URL: amqp://sigea:${RABBIT_PASSWORD}@rabbitmq:5672
       CEMAA_ENCRYPTION_KEY: ${CEMAA_ENCRYPTION_KEY}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
     depends_on:
       postgres:  { condition: service_healthy }
       rabbitmq:  { condition: service_healthy }

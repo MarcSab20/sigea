@@ -1,412 +1,275 @@
+// apps/frontend/src/app/manifestes/ManifestesPage.tsx
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useParams, Routes, Route } from 'react-router-dom';
+import { useNavigate, useParams, Routes, Route, useSearchParams } from 'react-router-dom';
 import { useAuthStore } from '@/stores/auth.store';
-import { manifesteApi, volApi, referentielApi, Manifeste, Vol, Passager, Materiel, CreateManifesteDto } from '@/services/manifeste.service';
+import { manifesteApi, volApi, Manifeste, Vol, Passager, Materiel, CreateManifesteDto } from '@/services/manifeste.service';
+import { T } from '@/lib/theme';
 import { toast } from 'sonner';
+import ManifestePrint from '@/components/ManifestePrint';
 
-const C = {
-  bg:'#04080f', panel:'#070e1a', border:'#0f2035', borderHi:'#1a3a5f',
-  green:'#00c896', greenDim:'#006448', amber:'#f59e0b', amberDim:'#78450a',
-  red:'#ef4444', blue:'#3b82f6', blueDim:'#1e3a70', text:'#d4e4f7',
-  textDim:'#4a7a9b', textMute:'#1e3a5f', input:'#050c18',
-  mono:"'Source Code Pro', monospace", display:"'Rajdhani', sans-serif",
-};
-
-// ─── Composants de base ───────────────────────────────────────────────────────
-
-function Panel({ children, style={} }: { children:React.ReactNode; style?:React.CSSProperties }): React.ReactElement {
-  return (
-    <div style={{ background:C.panel, border:`1px solid ${C.border}`, borderRadius:4,
-      position:'relative', overflow:'hidden', ...style }}>
-      <div style={{ position:'absolute', top:0, left:16, right:16, height:1,
-        background:`linear-gradient(90deg,transparent,${C.borderHi},transparent)` }} />
-      {children}
-    </div>
-  );
+// ─── Composants UI ─────────────────────────────────────────────────────────
+function Card({ children, style={} }: { children: React.ReactNode; style?: React.CSSProperties }): React.ReactElement {
+  return <div style={{ background: T.bgCard, border: `1px solid ${T.border}`,
+    borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.06)', ...style }}>{children}</div>;
 }
 
-function PH({ title, sub }: { title:string; sub?:string }): React.ReactElement {
-  return (
-    <div style={{ padding:'14px 18px 10px', borderBottom:`1px solid ${C.border}` }}>
-      {sub && <div style={{ fontSize:9, fontFamily:C.mono, color:C.textDim, letterSpacing:'0.25em',
-        textTransform:'uppercase' as const }}>{sub}</div>}
-      <div style={{ fontSize:13, fontFamily:C.display, fontWeight:600, color:C.text,
-        letterSpacing:'0.08em', textTransform:'uppercase' as const, marginTop:1 }}>{title}</div>
-    </div>
-  );
-}
-
-interface FieldProps {
-  label: string; value: string; onChange: (v:string)=>void;
+function Field({ label, value, onChange, type='text', required, options, placeholder, disabled, rows }: {
+  label: string; value: string; onChange: (v: string) => void;
   type?: string; required?: boolean; disabled?: boolean;
-  options?: { value:string; label:string }[];
-  placeholder?: string; mono?: boolean;
-}
-
-function Field({ label, value, onChange, type='text', required, disabled, options, placeholder, mono }: FieldProps): React.ReactElement {
+  options?: { value: string; label: string }[];
+  placeholder?: string; rows?: number;
+}): React.ReactElement {
   const [focused, setFocused] = useState(false);
   const base: React.CSSProperties = {
-    width:'100%', padding:'9px 12px', background:C.input,
-    border:`1px solid ${focused ? C.borderHi : C.border}`,
-    borderRadius:3, color:C.text, fontSize:12, outline:'none',
-    fontFamily: mono ? C.mono : C.display, boxSizing:'border-box' as const,
-    transition:'border-color 0.2s',
-    boxShadow: focused ? `0 0 0 2px ${C.borderHi}40` : 'none',
+    width: '100%', padding: '9px 12px', background: focused ? T.bgCard : T.bgInput,
+    border: `1px solid ${focused ? T.green : T.border}`, borderRadius: 6, color: T.text,
+    fontSize: 13, outline: 'none', boxSizing: 'border-box', transition: 'border-color 0.2s',
+    fontFamily: T.body, boxShadow: focused ? `0 0 0 3px ${T.green}20` : 'none',
   };
   return (
-    <div style={{ marginBottom:14 }}>
-      <label style={{ display:'block', fontSize:9, fontFamily:C.mono, letterSpacing:'0.2em',
-        color:C.textDim, textTransform:'uppercase' as const, marginBottom:5 }}>
-        {label}{required && <span style={{ color:C.red, marginLeft:3 }}>*</span>}
+    <div style={{ marginBottom: 14 }}>
+      <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: T.textSub, marginBottom: 5 }}>
+        {label}{required && <span style={{ color: T.red, marginLeft: 3 }}>*</span>}
       </label>
       {options ? (
-        <select value={value} onChange={e=>onChange(e.target.value)} disabled={disabled}
-          onFocus={()=>setFocused(true)} onBlur={()=>setFocused(false)}
-          style={{ ...base, appearance:'none', backgroundImage:`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%234a7a9b' stroke-width='1.5' fill='none'/%3E%3C/svg%3E")`,
-            backgroundRepeat:'no-repeat', backgroundPosition:'right 10px center', paddingRight:28 }}>
+        <select value={value} onChange={e => onChange(e.target.value)} disabled={disabled}
+          onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} style={base}>
           <option value="">— Sélectionner —</option>
-          {options.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
+          {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
+      ) : rows ? (
+        <textarea value={value} onChange={e => onChange(e.target.value)} rows={rows}
+          placeholder={placeholder} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
+          style={{ ...base, resize: 'vertical' }} />
       ) : (
-        <input type={type} value={value} onChange={e=>onChange(e.target.value)}
-          disabled={disabled} placeholder={placeholder}
-          onFocus={()=>setFocused(true)} onBlur={()=>setFocused(false)} style={base} />
+        <input type={type} value={value} onChange={e => onChange(e.target.value)}
+          placeholder={placeholder} disabled={disabled}
+          onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} style={base} />
       )}
     </div>
   );
 }
 
-function Badge({ label, color }: { label:string; color:string }): React.ReactElement {
-  return (
-    <span style={{ fontSize:9, fontFamily:C.mono, fontWeight:700, letterSpacing:'0.12em',
-      textTransform:'uppercase' as const, color, border:`1px solid ${color}`,
-      borderRadius:2, padding:'1px 5px', background:`${color}18` }}>{label}</span>
-  );
-}
+const CATEGORIES = ['TROUPES','TROUPES_PARA','CHEF_MIL','MISSION','PERMISSION','EVASAN','VIP','CIVIL','OP_SENSIBLE'];
+const TYPES_LOG = ['AA','IA','INTERMINISTERIEL','INDIVIDUEL','SENSIBLE_CEMAA'];
 
-function Spinner(): React.ReactElement {
-  return (
-    <div style={{ display:'flex', alignItems:'center', justifyContent:'center', padding:40 }}>
-      <div style={{ width:24, height:24, border:`2px solid ${C.borderHi}`,
-        borderTopColor:C.green, borderRadius:'50%', animation:'spin 0.8s linear infinite' }} />
-    </div>
-  );
-}
+const statusColor = (s: string): string =>
+  s==='VALIDE'?T.green:s==='REJETE'?T.red:s==='SOUMIS'?T.amberLight:s==='EN_VALIDATION'?T.blue:T.textDim;
 
-// ─── Topbar commune ───────────────────────────────────────────────────────────
-function Topbar({ title, onBack }: { title:string; onBack:()=>void }): React.ReactElement {
-  const { user } = useAuthStore();
-  return (
-    <div style={{ height:52, background:C.panel, borderBottom:`1px solid ${C.border}`,
-      display:'flex', alignItems:'center', justifyContent:'space-between',
-      padding:'0 20px', position:'sticky', top:0, zIndex:50 }}>
-      <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-        <button onClick={onBack} style={{ padding:'5px 12px', background:'transparent',
-          border:`1px solid ${C.borderHi}`, borderRadius:3, color:C.textDim, fontSize:9,
-          fontFamily:C.mono, cursor:'pointer', letterSpacing:'0.15em' }}>← RETOUR</button>
-        <div style={{ width:1, height:28, background:C.border }} />
-        <div style={{ fontSize:13, fontFamily:C.display, fontWeight:600, color:C.text,
-          letterSpacing:'0.15em', textTransform:'uppercase' as const }}>{title}</div>
-      </div>
-      <div style={{ fontSize:9, fontFamily:C.mono, color:C.textDim, letterSpacing:'0.15em' }}>
-        {user?.role?.toUpperCase()} · BASE {user?.base_id?.toUpperCase()}
-      </div>
-    </div>
-  );
-}
-
-// ─── LISTE DES MANIFESTES ─────────────────────────────────────────────────────
+// ─── LISTE ────────────────────────────────────────────────────────────────────
 function ManifestesListPage(): React.ReactElement {
   const navigate = useNavigate();
   const [manifestes, setManifestes] = useState<Manifeste[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    manifesteApi.list().then(setManifestes).catch(()=>toast.error('Erreur chargement')).finally(()=>setLoading(false));
+    manifesteApi.list().then(setManifestes).catch(() => toast.error('Erreur')).finally(() => setLoading(false));
   }, []);
 
-  const statusColor = (s:string):string => s==='VALIDE'?C.green:s==='REJETE'?C.red:s==='BROUILLON'?C.textDim:C.amber;
-
   return (
-    <div style={{ minHeight:'100vh', background:C.bg }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Source+Code+Pro:wght@400;500&display=swap');
-        @keyframes spin{to{transform:rotate(360deg)}}@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-        *{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#1a3a5f}
-        .row-hover:hover{background:rgba(26,58,95,0.25)!important;cursor:pointer}button:hover{filter:brightness(1.2)}
-        select,input{color-scheme:dark}`}</style>
-      <Topbar title="Manifestes d'Escale" onBack={()=>navigate('/')} />
-      <div style={{ padding:'20px', maxWidth:1200, margin:'0 auto' }}>
-        <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:14 }}>
-          <button onClick={()=>navigate('/manifestes/nouveau')} style={{
-            padding:'8px 20px', background:C.greenDim, border:`1px solid ${C.green}`,
-            borderRadius:3, color:C.green, fontSize:10, fontFamily:C.mono,
-            letterSpacing:'0.2em', cursor:'pointer', textTransform:'uppercase' as const }}>
-            + NOUVEAU MANIFESTE
-          </button>
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
+        <div>
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: T.text, fontFamily: T.display }}>Manifestes d'Escale</h1>
+          <p style={{ fontSize: 13, color: T.textDim, marginTop: 4 }}>Gestion des manifestes de votre base</p>
         </div>
-        <Panel>
-          {loading ? <Spinner /> : manifestes.length === 0 ? (
-            <div style={{ padding:60, textAlign:'center' }}>
-              <div style={{ fontSize:11, fontFamily:C.mono, color:C.textMute, letterSpacing:'0.2em',
-                textTransform:'uppercase' as const, marginBottom:20 }}>AUCUN MANIFESTE</div>
-              <button onClick={()=>navigate('/manifestes/nouveau')} style={{
-                padding:'10px 24px', background:C.greenDim, border:`1px solid ${C.green}`,
-                borderRadius:3, color:C.green, fontSize:10, fontFamily:C.mono,
-                letterSpacing:'0.2em', cursor:'pointer', textTransform:'uppercase' as const }}>
-                CRÉER MAINTENANT
-              </button>
-            </div>
-          ) : (
-            <div>
-              <div style={{ display:'grid', gridTemplateColumns:'90px 1fr 120px 130px 60px 60px 120px',
-                padding:'8px 18px', borderBottom:`1px solid ${C.border}`,
-                fontSize:8, fontFamily:C.mono, color:C.textDim, letterSpacing:'0.2em', textTransform:'uppercase' as const }}>
-                <span>REF</span><span>VOL</span><span>DATE</span><span>STATUT</span>
-                <span>PAX</span><span>VER.</span><span style={{textAlign:'right'}}>ACTIONS</span>
-              </div>
-              {manifestes.map((m,i)=>{
-                const col = statusColor(m.statut);
-                return (
-                  <div key={m.id} className="row-hover"
-                    onClick={()=>navigate(`/manifestes/${m.id}`)}
-                    style={{ display:'grid', gridTemplateColumns:'90px 1fr 120px 130px 60px 60px 120px',
-                      padding:'12px 18px', borderBottom:`1px solid ${C.border}55`,
-                      alignItems:'center', transition:'background 0.15s',
-                      animation:`fadeUp ${0.1+i*0.04}s ease forwards` }}>
-                    <span style={{ fontSize:9, fontFamily:C.mono, color:C.green }}>
-                      #{m.id.slice(0,6).toUpperCase()}
-                    </span>
-                    <div>
-                      <span style={{ fontSize:12, fontFamily:C.display, fontWeight:600, color:C.text }}>
-                        {m.vol?.numero_mission ?? m.vol_id.slice(0,12)}
-                      </span>
-                      {m.flag_sensible && <Badge label="SENSIBLE" color={C.amber} />}
-                    </div>
-                    <span style={{ fontSize:10, fontFamily:C.mono, color:C.textDim }}>
-                      {new Date(m.createdAt).toLocaleDateString('fr-FR')}
-                    </span>
-                    <Badge label={m.statut.replace('_',' ')} color={col} />
-                    <span style={{ fontSize:12, fontFamily:C.mono, color:C.text }}>{m._count?.passagers??0}</span>
-                    <span style={{ fontSize:10, fontFamily:C.mono, color:C.textDim }}>v{m.version}</span>
-                    <div style={{ display:'flex', gap:6, justifyContent:'flex-end' }}>
-                      <button onClick={e=>{e.stopPropagation();navigate(`/manifestes/${m.id}`);}} style={{
-                        padding:'4px 10px', background:C.blueDim, border:`1px solid ${C.blue}`,
-                        borderRadius:2, color:C.blue, fontSize:8, fontFamily:C.mono, cursor:'pointer' }}>
-                        VOIR
-                      </button>
-                      {m.statut==='BROUILLON' && (
-                        <button onClick={e=>{e.stopPropagation();navigate(`/manifestes/${m.id}/edit`);}} style={{
-                          padding:'4px 10px', background:C.greenDim, border:`1px solid ${C.green}`,
-                          borderRadius:2, color:C.green, fontSize:8, fontFamily:C.mono, cursor:'pointer' }}>
-                          SAISIR
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </Panel>
+        <button onClick={() => navigate('/manifestes/nouveau')} style={{
+          padding: '10px 20px', background: T.green, border: 'none', borderRadius: 6,
+          color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>+ Nouveau</button>
       </div>
+      <Card>
+        {loading ? <div style={{ padding: 48, textAlign: 'center', color: T.textDim }}>Chargement…</div> :
+        manifestes.length === 0 ? (
+          <div style={{ padding: 60, textAlign: 'center' }}>
+            <div style={{ fontSize: 14, color: T.textDim, marginBottom: 20 }}>Aucun manifeste</div>
+            <button onClick={() => navigate('/manifestes/nouveau')} style={{
+              padding: '10px 24px', background: T.green, border: 'none', borderRadius: 6,
+              color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Créer maintenant</button>
+          </div>
+        ) : (
+          <div>
+            <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr 120px 130px 50px 60px 130px',
+              padding: '8px 20px', fontSize: 10, fontWeight: 600, color: T.textDim,
+              textTransform: 'uppercase', letterSpacing: '0.08em', borderBottom: `1px solid ${T.border}` }}>
+              <span>Réf.</span><span>Vol</span><span>Date</span><span>Statut</span>
+              <span>PAX</span><span>Ver.</span><span style={{ textAlign: 'right' }}>Actions</span>
+            </div>
+            {manifestes.map(m => {
+              const col = statusColor(m.statut);
+              return (
+                <div key={m.id} className="row-hover" onClick={() => navigate(`/manifestes/${m.id}`)}
+                  style={{ display: 'grid', gridTemplateColumns: '90px 1fr 120px 130px 50px 60px 130px',
+                    padding: '13px 20px', borderBottom: `1px solid ${T.border}`,
+                    alignItems: 'center', transition: 'background 0.1s' }}>
+                  <span style={{ fontSize: 11, fontFamily: T.mono, color: T.green, fontWeight: 500 }}>
+                    #{m.id.slice(0,6).toUpperCase()}
+                  </span>
+                  <div>
+                    <span style={{ fontSize: 13, fontWeight: 500, color: T.text }}>
+                      {m.vol?.numero_mission ?? m.vol_id.slice(0,12)}
+                    </span>
+                    {m.flag_sensible && <span style={{ marginLeft: 8, fontSize: 10, color: T.amber,
+                      background: T.amberBg, border: `1px solid ${T.amberBorder}`, borderRadius: 4,
+                      padding: '1px 5px' }}>SENSIBLE</span>}
+                  </div>
+                  <span style={{ fontSize: 12, color: T.textDim }}>{new Date(m.createdAt).toLocaleDateString('fr-FR')}</span>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: col, background: `${col}18`,
+                    border: `1px solid ${col}40`, borderRadius: 4, padding: '2px 8px', textTransform: 'uppercase' }}>
+                    {m.statut.replace('_',' ')}
+                  </span>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{m._count?.passagers ?? 0}</span>
+                  <span style={{ fontSize: 12, color: T.textDim }}>v{m.version}</span>
+                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                    {m.statut === 'BROUILLON' && (
+                      <button onClick={e => { e.stopPropagation(); navigate(`/manifestes/${m.id}/edit`); }} style={{
+                        padding: '4px 10px', background: T.greenBg, border: `1px solid ${T.greenBorder}`,
+                        borderRadius: 4, color: T.green, fontSize: 11, cursor: 'pointer', fontWeight: 500 }}>
+                        Saisir
+                      </button>
+                    )}
+                    <button onClick={e => { e.stopPropagation(); navigate(`/manifestes/${m.id}`); }} style={{
+                      padding: '4px 10px', background: T.blueBg, border: `1px solid ${T.blueBorder}`,
+                      borderRadius: 4, color: T.blue, fontSize: 11, cursor: 'pointer', fontWeight: 500 }}>
+                      Voir
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
     </div>
   );
 }
 
-// ─── CRÉATION DE MANIFESTE ────────────────────────────────────────────────────
+// ─── NOUVEAU MANIFESTE ────────────────────────────────────────────────────────
 function NouveauManifestePage(): React.ReactElement {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [vols, setVols] = useState<Vol[]>([]);
-  const [loadingVols, setLoadingVols] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [volId, setVolId] = useState('');
+  const [volId, setVolId] = useState(searchParams.get('vol') ?? '');
   const [etapeVol, setEtapeVol] = useState('A');
 
   useEffect(() => {
-    volApi.list()
-      .then(setVols)
-      .catch(()=>{ /* vols indisponibles — saisie manuelle */ })
-      .finally(()=>setLoadingVols(false));
+    volApi.list().then(setVols).catch(() => {});
   }, []);
 
-  const volSelectionne = vols.find(v=>v.id===volId);
+  const volSelectionne = vols.find(v => v.id === volId);
 
   const handleCreate = async (): Promise<void> => {
     if (!volId) { toast.error('Sélectionnez un vol'); return; }
     setSubmitting(true);
     try {
-      const dto: CreateManifesteDto = { vol_id: volId, etape_vol: etapeVol };
-      const m = await manifesteApi.create(dto);
-      toast.success('Manifeste créé — accès à la saisie');
+      const m = await manifesteApi.create({ vol_id: volId, etape_vol: etapeVol });
+      toast.success('Manifeste créé');
       navigate(`/manifestes/${m.id}/edit`);
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message;
       toast.error(msg ?? 'Erreur de création');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const typeColors: Record<string,string> = {
-    PROJECTION:C.blue, PARA:C.blue, LIAISON:C.textDim, LOGISTIQUE:C.textDim,
-    EVASAN:C.red, VIP:C.amber, OP_SENSIBLE:C.amber,
+    } finally { setSubmitting(false); }
   };
 
   return (
-    <div style={{ minHeight:'100vh', background:C.bg }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Source+Code+Pro:wght@400;500&display=swap');
-        @keyframes spin{to{transform:rotate(360deg)}}@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-        *{box-sizing:border-box;margin:0;padding:0}select,input{color-scheme:dark}button:hover{filter:brightness(1.2)}`}</style>
-      <Topbar title="Nouveau Manifeste" onBack={()=>navigate('/manifestes')} />
-
-      <div style={{ padding:'24px 20px', maxWidth:900, margin:'0 auto', animation:'fadeUp 0.3s ease forwards' }}>
-
-        {/* ÉTAPE 1 — Sélection du vol */}
-        <Panel style={{ marginBottom:16 }}>
-          <PH title="Étape 1 — Sélection du Vol" sub="Référence opérationnelle" />
-          <div style={{ padding:'20px 24px' }}>
-            {loadingVols ? (
-              <div style={{ fontSize:10, fontFamily:C.mono, color:C.textDim, marginBottom:16 }}>
-                Chargement des vols…
-              </div>
-            ) : vols.length === 0 ? (
-              <div style={{ padding:'12px 16px', background:`${C.amber}10`, border:`1px solid ${C.amberDim}`,
-                borderRadius:3, fontSize:10, fontFamily:C.mono, color:C.amber, marginBottom:16,
-                letterSpacing:'0.08em' }}>
-                ⚠ Aucun vol disponible — contactez l'opérateur vol pour créer un vol
-              </div>
-            ) : (
-              <Field label="Vol de rattachement" value={volId} onChange={setVolId} required
-                options={vols.map(v=>({
-                  value:v.id,
-                  label:`${v.numero_mission} · ${v.immatriculation} · ${new Date(v.date_heure).toLocaleDateString('fr-FR')} ${new Date(v.date_heure).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}`
-                }))} />
-            )}
-
-            {/* Fiche vol sélectionné */}
-            {volSelectionne && (
-              <div style={{ marginTop:4, padding:'14px 16px', background:`${C.green}08`,
-                border:`1px solid ${C.greenDim}`, borderRadius:3 }}>
-                <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:12 }}>
-                  {[
-                    { label:'Mission', value:volSelectionne.numero_mission },
-                    { label:'Aéronef', value:volSelectionne.immatriculation },
-                    { label:'Type', value:volSelectionne.type_mission },
-                    { label:'Date / Heure', value:new Date(volSelectionne.date_heure).toLocaleString('fr-FR') },
-                    { label:'Capacité PAX', value:`${volSelectionne.capacite_places} places` },
-                    { label:'Capacité Cargo', value:`${volSelectionne.capacite_cargo_kg} kg` },
-                  ].map(f=>(
-                    <div key={f.label}>
-                      <div style={{ fontSize:8, fontFamily:C.mono, color:C.textDim,
-                        letterSpacing:'0.2em', textTransform:'uppercase' as const, marginBottom:2 }}>{f.label}</div>
-                      <div style={{ fontSize:11, fontFamily:C.mono, color:C.text }}>{f.value}</div>
-                    </div>
-                  ))}
-                </div>
-                {volSelectionne.flag_sensible && (
-                  <div style={{ marginTop:12, padding:'8px 12px', background:`${C.amber}15`,
-                    border:`1px solid ${C.amber}`, borderRadius:3, fontSize:10,
-                    fontFamily:C.mono, color:C.amber }}>
-                    ◆ VOL SENSIBLE — Circuit de validation CEMAA activé automatiquement
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Étape vol (multi-escales) */}
-            <div style={{ marginTop:16 }}>
-              <Field label="Étape du vol (multi-escales)" value={etapeVol} onChange={setEtapeVol}
-                options={[
-                  { value:'A', label:'A — Départ (manifeste maître)' },
-                  { value:'B', label:'B — 1ère escale intermédiaire' },
-                  { value:'C', label:'C — 2ème escale intermédiaire' },
-                  { value:'D', label:'D — Terminus (arrivée finale)' },
-                ]} />
-              {etapeVol !== 'A' && (
-                <div style={{ padding:'10px 14px', background:`${C.blue}10`,
-                  border:`1px solid ${C.blueDim}`, borderRadius:3,
-                  fontSize:10, fontFamily:C.mono, color:C.blue, marginTop:4 }}>
-                  ℹ Manifeste enfant — référencez l'ID du manifeste maître si disponible
-                </div>
-              )}
-            </div>
-          </div>
-        </Panel>
-
-        {/* RÉCAPITULATIF + ACTION */}
-        <Panel>
-          <PH title="Validation & Création" sub="Récapitulatif" />
-          <div style={{ padding:'20px 24px' }}>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, marginBottom:20 }}>
-              <div style={{ padding:'12px 16px', background:`${C.border}80`, borderRadius:3 }}>
-                <div style={{ fontSize:9, fontFamily:C.mono, color:C.textDim,
-                  textTransform:'uppercase' as const, letterSpacing:'0.2em', marginBottom:6 }}>Vol rattaché</div>
-                <div style={{ fontSize:12, fontFamily:C.mono, color: volId ? C.green : C.textMute }}>
-                  {volId ? (volSelectionne?.numero_mission ?? volId.slice(0,8)) : 'Non sélectionné'}
-                </div>
-              </div>
-              <div style={{ padding:'12px 16px', background:`${C.border}80`, borderRadius:3 }}>
-                <div style={{ fontSize:9, fontFamily:C.mono, color:C.textDim,
-                  textTransform:'uppercase' as const, letterSpacing:'0.2em', marginBottom:6 }}>Étape vol</div>
-                <div style={{ fontSize:12, fontFamily:C.mono, color:C.text }}>Étape {etapeVol}</div>
-              </div>
-            </div>
-
-            <div style={{ display:'flex', gap:12, justifyContent:'flex-end' }}>
-              <button onClick={()=>navigate('/manifestes')} style={{
-                padding:'10px 24px', background:'transparent', border:`1px solid ${C.borderHi}`,
-                borderRadius:3, color:C.textDim, fontSize:10, fontFamily:C.mono,
-                letterSpacing:'0.2em', cursor:'pointer', textTransform:'uppercase' as const }}>
-                ANNULER
-              </button>
-              <button onClick={handleCreate} disabled={!volId || submitting} style={{
-                padding:'10px 28px', background: (!volId||submitting) ? `${C.greenDim}50` : C.greenDim,
-                border:`1px solid ${(!volId||submitting)?C.textMute:C.green}`,
-                borderRadius:3, color:(!volId||submitting)?C.textMute:C.green, fontSize:10,
-                fontFamily:C.mono, letterSpacing:'0.2em', cursor:(!volId||submitting)?'not-allowed':'pointer',
-                textTransform:'uppercase' as const, display:'flex', alignItems:'center', gap:8 }}>
-                {submitting ? (
-                  <><div style={{ width:12, height:12, border:`2px solid ${C.textMute}`,
-                    borderTopColor:C.green, borderRadius:'50%', animation:'spin 0.8s linear infinite' }} />
-                  CRÉATION…</>
-                ) : 'CRÉER LE MANIFESTE →'}
-              </button>
-            </div>
-          </div>
-        </Panel>
+    <div style={{ maxWidth: 800, margin: '0 auto' }}>
+      <div style={{ marginBottom: 24 }}>
+        <h1 style={{ fontSize: 22, fontWeight: 700, color: T.text, fontFamily: T.display }}>Nouveau Manifeste</h1>
+        <p style={{ fontSize: 13, color: T.textDim, marginTop: 4 }}>Rattachement à un vol planifié</p>
       </div>
+      <Card style={{ padding: '24px 28px' }}>
+        {vols.length === 0 ? (
+          <div style={{ padding: '16px', background: T.amberBg, border: `1px solid ${T.amberBorder}`,
+            borderRadius: 6, marginBottom: 20, fontSize: 12, color: T.amber }}>
+            ⚠ Aucun vol disponible — <button onClick={() => navigate('/vols/nouveau')} style={{
+              background: 'none', border: 'none', color: T.blue, cursor: 'pointer',
+              fontSize: 12, textDecoration: 'underline' }}>créer un vol d'abord</button>
+          </div>
+        ) : (
+          <Field label="Vol de rattachement" value={volId} onChange={setVolId} required
+            options={vols.map(v => ({
+              value: v.id,
+              label: `${v.numero_mission} · ${v.immatriculation} · ${new Date(v.date_heure).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}`
+            }))} />
+        )}
+
+        {volSelectionne && (
+          <div style={{ padding: '14px 16px', background: T.greenBg,
+            border: `1px solid ${T.greenBorder}`, borderRadius: 6, marginBottom: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10 }}>
+              {[
+                ['Aéronef', volSelectionne.immatriculation],
+                ['Type', volSelectionne.type_mission],
+                ['Capacité PAX', String(volSelectionne.capacite_places) + ' places'],
+                ['Cargo', volSelectionne.capacite_cargo_kg + ' kg'],
+                ['Départ', new Date(volSelectionne.date_heure).toLocaleString('fr-FR')],
+              ].map(([l, v]) => (
+                <div key={l}>
+                  <div style={{ fontSize: 10, color: T.textDim, marginBottom: 2 }}>{l}</div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: T.text }}>{v}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <Field label="Étape du vol" value={etapeVol} onChange={setEtapeVol}
+          options={[
+            { value: 'A', label: 'A — Départ (manifeste maître)' },
+            { value: 'B', label: 'B — 1ère escale intermédiaire' },
+            { value: 'C', label: 'C — 2ème escale intermédiaire' },
+            { value: 'D', label: 'D — Terminus' },
+          ]} />
+
+        <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 8 }}>
+          <button onClick={() => navigate('/manifestes')} style={{
+            padding: '10px 24px', background: T.bgAlt, border: `1px solid ${T.border}`,
+            borderRadius: 6, color: T.textSub, fontSize: 13, cursor: 'pointer' }}>Annuler</button>
+          <button onClick={handleCreate} disabled={!volId || submitting} style={{
+            padding: '10px 28px', background: (!volId || submitting) ? T.textMute : T.green,
+            border: 'none', borderRadius: 6, color: '#fff', fontSize: 13, fontWeight: 600,
+            cursor: (!volId || submitting) ? 'not-allowed' : 'pointer' }}>
+            {submitting ? 'Création…' : 'Créer le manifeste →'}
+          </button>
+        </div>
+      </Card>
     </div>
   );
 }
 
-// ─── SAISIE MANIFESTE (passagers + matériels) ─────────────────────────────────
+// ─── SAISIE ────────────────────────────────────────────────────────────────────
 function SaisieManifestePage(): React.ReactElement {
-  const { id } = useParams<{ id:string }>();
+  const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [manifeste, setManifeste] = useState<Manifeste|null>(null);
+  const { user } = useAuthStore();
+  const [manifeste, setManifeste] = useState<Manifeste | null>(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<'passagers'|'materiels'|'recap'>('passagers');
+  const [tab, setTab] = useState<'passagers' | 'materiels' | 'recap'>('passagers');
   const [submitting, setSubmitting] = useState(false);
+  const [showPrint, setShowPrint] = useState(false);
 
-  // Formulaire passager
   const [pax, setPax] = useState<Passager>({
-    nom:'', prenom:'', grade:'', categorie:'TROUPES', matricule:'', unite:'', destination:'',
-    nb_bagages:0, masse_bagages_kg:0, couleur_bagages:'', contact_urgence_nom:'',
-    contact_urgence_tel:'', contact_urgence_qual:'', ref_autorisation:'',
+    nom:'', prenom:'', grade:'', categorie:'TROUPES', matricule:'', unite:'',
+    destination:'', nb_bagages:0, masse_bagages_kg:0, couleur_bagages:'',
+    contact_urgence_nom:'', contact_urgence_tel:'', contact_urgence_qual:'', ref_autorisation:'',
   });
-
-  // Formulaire matériel
   const [mat, setMat] = useState<Materiel>({
     designation:'', type_mission_log:'AA', proprietaire:'', poids_kg:0,
     volume:0, destination:'', expediteur_nom:'', expediteur_fonction:'', expediteur_tel:'',
   });
-
   const [savingPax, setSavingPax] = useState(false);
   const [savingMat, setSavingMat] = useState(false);
 
+  const refresh = async (): Promise<void> => {
+    if (!id) return;
+    const m = await manifesteApi.get(id);
+    setManifeste(m);
+  };
+
   useEffect(() => {
     if (!id) return;
-    manifesteApi.get(id).then(setManifeste).catch(()=>toast.error('Manifeste introuvable')).finally(()=>setLoading(false));
+    manifesteApi.get(id).then(m => { setManifeste(m); setLoading(false); })
+      .catch(() => { toast.error('Manifeste introuvable'); setLoading(false); });
   }, [id]);
 
   const handleAddPax = async (): Promise<void> => {
@@ -416,15 +279,13 @@ function SaisieManifestePage(): React.ReactElement {
     setSavingPax(true);
     try {
       await manifesteApi.addPassager(id, pax);
-      toast.success(`Passager ${pax.nom} ${pax.prenom} ajouté`);
-      const updated = await manifesteApi.get(id);
-      setManifeste(updated);
-      setPax({ nom:'', prenom:'', grade:'', categorie:'TROUPES', matricule:'', unite:'', destination:'',
-        nb_bagages:0, masse_bagages_kg:0, couleur_bagages:'', contact_urgence_nom:'',
-        contact_urgence_tel:'', contact_urgence_qual:'', ref_autorisation:'' });
+      toast.success(`${pax.nom} ${pax.prenom} ajouté`);
+      await refresh();
+      setPax({ nom:'', prenom:'', grade:'', categorie:'TROUPES', matricule:'', unite:'',
+        destination:'', nb_bagages:0, masse_bagages_kg:0, couleur_bagages:'',
+        contact_urgence_nom:'', contact_urgence_tel:'', contact_urgence_qual:'', ref_autorisation:'' });
     } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      toast.error(msg ?? 'Erreur ajout passager');
+      toast.error((e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Erreur');
     } finally { setSavingPax(false); }
   };
 
@@ -435,14 +296,12 @@ function SaisieManifestePage(): React.ReactElement {
     setSavingMat(true);
     try {
       await manifesteApi.addMateriel(id, mat);
-      toast.success(`Matériel "${mat.designation}" ajouté`);
-      const updated = await manifesteApi.get(id);
-      setManifeste(updated);
+      toast.success(`"${mat.designation}" ajouté`);
+      await refresh();
       setMat({ designation:'', type_mission_log:'AA', proprietaire:'', poids_kg:0,
         volume:0, destination:'', expediteur_nom:'', expediteur_fonction:'', expediteur_tel:'' });
     } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      toast.error(msg ?? 'Erreur ajout matériel');
+      toast.error((e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Erreur');
     } finally { setSavingMat(false); }
   };
 
@@ -454,306 +313,274 @@ function SaisieManifestePage(): React.ReactElement {
       toast.success('Manifeste soumis au circuit de validation');
       navigate(`/manifestes/${id}`);
     } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      toast.error(msg ?? 'Erreur soumission');
+      toast.error((e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Erreur');
     } finally { setSubmitting(false); }
   };
 
-  const CATEGORIES = ['TROUPES','TROUPES_PARA','CHEF_MIL','MISSION','PERMISSION','EVASAN','VIP','CIVIL','OP_SENSIBLE'];
-  const TYPES_LOG = ['AA','IA','INTERMINISTERIEL','INDIVIDUEL','SENSIBLE_CEMAA'];
+  if (loading) return <div style={{ padding: 48, textAlign: 'center', color: T.textDim }}>Chargement…</div>;
+  if (!manifeste) return <div style={{ padding: 48, textAlign: 'center', color: T.red }}>Manifeste introuvable</div>;
 
-  if (loading) return (
-    <div style={{ minHeight:'100vh', background:C.bg, display:'flex', alignItems:'center', justifyContent:'center' }}>
-      <div style={{ width:24, height:24, border:`2px solid ${C.borderHi}`, borderTopColor:C.green,
-        borderRadius:'50%', animation:'spin 0.8s linear infinite' }} />
-    </div>
-  );
-
-  if (!manifeste) return (
-    <div style={{ minHeight:'100vh', background:C.bg, display:'flex', alignItems:'center', justifyContent:'center' }}>
-      <div style={{ fontSize:11, fontFamily:C.mono, color:C.red }}>MANIFESTE INTROUVABLE</div>
-    </div>
-  );
+  const readOnly = manifeste.statut !== 'BROUILLON';
 
   return (
-    <div style={{ minHeight:'100vh', background:C.bg }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Source+Code+Pro:wght@400;500&display=swap');
-        @keyframes spin{to{transform:rotate(360deg)}}@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-        *{box-sizing:border-box;margin:0;padding:0}select,input{color-scheme:dark}button:hover{filter:brightness(1.2)}`}</style>
-      <Topbar title={`Saisie Manifeste #${manifeste.id.slice(0,6).toUpperCase()}`} onBack={()=>navigate('/manifestes')} />
-
-      <div style={{ padding:'20px', maxWidth:1100, margin:'0 auto' }}>
-
-        {/* INFO VOL */}
-        <Panel style={{ marginBottom:14 }}>
-          <div style={{ padding:'12px 18px', display:'flex', alignItems:'center', gap:16, flexWrap:'wrap' }}>
-            <div>
-              <span style={{ fontSize:9, fontFamily:C.mono, color:C.textDim, letterSpacing:'0.2em' }}>VOL </span>
-              <span style={{ fontSize:12, fontFamily:C.mono, color:C.green }}>
-                {manifeste.vol?.numero_mission ?? manifeste.vol_id.slice(0,8).toUpperCase()}
-              </span>
-            </div>
-            <div style={{ width:1, height:20, background:C.border }} />
-            <div>
-              <span style={{ fontSize:9, fontFamily:C.mono, color:C.textDim }}>AÉRONEF </span>
-              <span style={{ fontSize:12, fontFamily:C.mono, color:C.text }}>{manifeste.vol?.immatriculation ?? '—'}</span>
-            </div>
-            <div style={{ width:1, height:20, background:C.border }} />
-            <div>
-              <span style={{ fontSize:9, fontFamily:C.mono, color:C.textDim }}>PAX </span>
-              <span style={{ fontSize:12, fontFamily:C.mono, color:C.text }}>{manifeste.passagers?.length ?? 0}</span>
-              {manifeste.vol && <span style={{ fontSize:9, fontFamily:C.mono, color:C.textDim }}>/{manifeste.vol.capacite_places}</span>}
-            </div>
-            <div style={{ width:1, height:20, background:C.border }} />
-            <div>
-              <span style={{ fontSize:9, fontFamily:C.mono, color:C.textDim }}>STATUT </span>
-              <span style={{ fontSize:10, fontFamily:C.mono, color: manifeste.statut==='BROUILLON'?C.textDim:C.amber }}>
-                {manifeste.statut}
-              </span>
-            </div>
-            {manifeste.flag_sensible && (
-              <span style={{ fontSize:9, fontFamily:C.mono, fontWeight:700, color:C.amber,
-                border:`1px solid ${C.amber}`, borderRadius:2, padding:'1px 6px', background:`${C.amber}15` }}>
-                ◆ SENSIBLE
-              </span>
-            )}
-            <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
-              {manifeste.statut === 'BROUILLON' && (
-                <button onClick={handleSoumettre} disabled={submitting} style={{
-                  padding:'6px 18px', background:C.greenDim, border:`1px solid ${C.green}`,
-                  borderRadius:3, color:C.green, fontSize:9, fontFamily:C.mono,
-                  letterSpacing:'0.2em', cursor:'pointer', textTransform:'uppercase' as const }}>
-                  {submitting ? 'SOUMISSION…' : 'SOUMETTRE AU CIRCUIT ↗'}
-                </button>
-              )}
-            </div>
-          </div>
-        </Panel>
-
-        {/* ONGLETS */}
-        <div style={{ display:'flex', gap:4, marginBottom:14 }}>
-          {(['passagers','materiels','recap'] as const).map(t=>(
-            <button key={t} onClick={()=>setTab(t)} style={{
-              padding:'8px 20px', background: tab===t ? C.panelB : 'transparent',
-              border:`1px solid ${tab===t ? C.borderHi : C.border}`,
-              borderRadius:'3px 3px 0 0', color: tab===t ? C.text : C.textDim,
-              fontSize:10, fontFamily:C.mono, letterSpacing:'0.2em', cursor:'pointer',
-              textTransform:'uppercase' as const, transition:'all 0.15s',
-              borderBottom: tab===t ? `1px solid ${C.panelB}` : `1px solid ${C.border}`,
-            }}>
-              {t==='passagers' ? `PASSAGERS (${manifeste.passagers?.length??0})` :
-               t==='materiels' ? `MATÉRIELS (${manifeste.materiels?.length??0})` : 'RÉCAPITULATIF'}
-            </button>
-          ))}
+    <div>
+      {/* En-tête */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+        <div>
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: T.text, fontFamily: T.display }}>
+            Manifeste #{manifeste.id.slice(0,6).toUpperCase()}
+          </h1>
+          <p style={{ fontSize: 13, color: T.textDim, marginTop: 4 }}>
+            {manifeste.vol?.numero_mission ?? manifeste.vol_id.slice(0,12)}
+            {manifeste.flag_sensible && <span style={{ marginLeft: 8, color: T.amber }}>◆ SENSIBLE</span>}
+          </p>
         </div>
-
-        {/* ONGLET PASSAGERS */}
-        {tab === 'passagers' && (
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, animation:'fadeUp 0.2s ease forwards' }}>
-            {/* Formulaire */}
-            <Panel>
-              <PH title="Ajouter un Passager" sub="Saisie Chef d'Escale" />
-              <div style={{ padding:'16px 20px' }}>
-                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 16px' }}>
-                  <Field label="Nom" value={pax.nom} onChange={v=>setPax({...pax,nom:v})} required mono />
-                  <Field label="Prénom(s)" value={pax.prenom} onChange={v=>setPax({...pax,prenom:v})} required mono />
-                  <Field label="Grade / Qualité" value={pax.grade??''} onChange={v=>setPax({...pax,grade:v})} mono />
-                  <Field label="Catégorie" value={pax.categorie} onChange={v=>setPax({...pax,categorie:v})} required
-                    options={CATEGORIES.map(c=>({value:c,label:c.replace('_',' ')}))} />
-                  <Field label="Matricule (si MIL)" value={pax.matricule??''} onChange={v=>setPax({...pax,matricule:v})} mono />
-                  <Field label="Unité" value={pax.unite??''} onChange={v=>setPax({...pax,unite:v})} mono />
-                </div>
-                <Field label="Destination finale" value={pax.destination} onChange={v=>setPax({...pax,destination:v})} required mono />
-                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'0 16px' }}>
-                  <Field label="Nb bagages" value={String(pax.nb_bagages)} type="number"
-                    onChange={v=>setPax({...pax,nb_bagages:Number(v)})} required />
-                  <Field label="Masse bagages (kg)" value={String(pax.masse_bagages_kg)} type="number"
-                    onChange={v=>setPax({...pax,masse_bagages_kg:Number(v)})} required />
-                  <Field label="Couleur bagages" value={pax.couleur_bagages??''} onChange={v=>setPax({...pax,couleur_bagages:v})} mono />
-                </div>
-                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 16px' }}>
-                  <Field label="Contact urgence — nom" value={pax.contact_urgence_nom} onChange={v=>setPax({...pax,contact_urgence_nom:v})} required mono />
-                  <Field label="Contact urgence — tél" value={pax.contact_urgence_tel} onChange={v=>setPax({...pax,contact_urgence_tel:v})} required mono placeholder="+237XXXXXXXXX" />
-                </div>
-                <Field label="Réf. autorisation (ordre de mission)" value={pax.ref_autorisation??''} onChange={v=>setPax({...pax,ref_autorisation:v})} mono />
-                {(pax.categorie==='EVASAN') && (
-                  <div style={{ padding:'8px 12px', background:`${C.red}12`, border:`1px solid ${C.red}`,
-                    borderRadius:3, fontSize:10, fontFamily:C.mono, color:C.red, marginBottom:12 }}>
-                    ✚ EVASAN — Circuit accéléré activé à la soumission
-                  </div>
-                )}
-                {(pax.categorie==='VIP') && (
-                  <div style={{ padding:'8px 12px', background:`${C.amber}12`, border:`1px solid ${C.amber}`,
-                    borderRadius:3, fontSize:10, fontFamily:C.mono, color:C.amber, marginBottom:12 }}>
-                    ◆ VIP — Notification COMBASE + CEMAA automatique
-                  </div>
-                )}
-                <button onClick={handleAddPax} disabled={savingPax} style={{
-                  width:'100%', padding:'10px', background:C.greenDim, border:`1px solid ${C.green}`,
-                  borderRadius:3, color:C.green, fontSize:10, fontFamily:C.mono,
-                  letterSpacing:'0.2em', cursor:'pointer', textTransform:'uppercase' as const,
-                  display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}>
-                  {savingPax ? <>
-                    <div style={{ width:12, height:12, border:`2px solid ${C.textMute}`, borderTopColor:C.green,
-                      borderRadius:'50%', animation:'spin 0.8s linear infinite' }} />AJOUT…
-                  </> : '+ AJOUTER CE PASSAGER'}
-                </button>
-              </div>
-            </Panel>
-
-            {/* Liste passagers */}
-            <Panel>
-              <PH title={`Liste Passagers (${manifeste.passagers?.length??0})`} sub="Embarqués" />
-              <div style={{ maxHeight:600, overflowY:'auto' }}>
-                {!manifeste.passagers?.length ? (
-                  <div style={{ padding:40, textAlign:'center', fontSize:10, fontFamily:C.mono,
-                    color:C.textMute, letterSpacing:'0.15em' }}>AUCUN PASSAGER</div>
-                ) : manifeste.passagers.map((p,i)=>(
-                  <div key={p.id??i} style={{ padding:'10px 18px', borderBottom:`1px solid ${C.border}55`,
-                    animation:`fadeUp ${0.1+i*0.04}s ease forwards` }}>
-                    <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:4 }}>
-                      <div style={{ fontSize:12, fontFamily:C.display, fontWeight:600, color:C.text }}>
-                        {p.grade && <span style={{ color:C.textDim, marginRight:6 }}>{p.grade}</span>}
-                        {p.nom} {p.prenom}
-                      </div>
-                      <div style={{ display:'flex', gap:5, alignItems:'center' }}>
-                        {p.verrouille && <span style={{ fontSize:8, fontFamily:C.mono, color:C.amber, border:`1px solid ${C.amber}`, borderRadius:2, padding:'0 4px' }}>🔒 CEMAA</span>}
-                        {p.sensible && <span style={{ fontSize:8, fontFamily:C.mono, color:C.red, border:`1px solid ${C.red}`, borderRadius:2, padding:'0 4px' }}>SENSIBLE</span>}
-                        <span style={{ fontSize:9, fontFamily:C.mono, color:C.textDim }}>{p.categorie}</span>
-                      </div>
-                    </div>
-                    <div style={{ fontSize:9, fontFamily:C.mono, color:C.textDim, display:'flex', gap:16 }}>
-                      <span>→ {p.destination}</span>
-                      <span>{p.nb_bagages} bag. · {p.masse_bagages_kg}kg</span>
-                      {p.matricule && <span>Mat: {p.matricule}</span>}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </Panel>
-          </div>
-        )}
-
-        {/* ONGLET MATÉRIELS */}
-        {tab === 'materiels' && (
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, animation:'fadeUp 0.2s ease forwards' }}>
-            <Panel>
-              <PH title="Ajouter un Matériel" sub="Saisie logistique" />
-              <div style={{ padding:'16px 20px' }}>
-                <Field label="Désignation" value={mat.designation} onChange={v=>setMat({...mat,designation:v})} required mono />
-                <Field label="Type mission logistique" value={mat.type_mission_log} onChange={v=>setMat({...mat,type_mission_log:v})} required
-                  options={TYPES_LOG.map(t=>({value:t,label:t.replace('_',' ')}))} />
-                <Field label="Propriétaire / Unité" value={mat.proprietaire} onChange={v=>setMat({...mat,proprietaire:v})} required mono />
-                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 16px' }}>
-                  <Field label="Poids (kg)" value={String(mat.poids_kg)} type="number" onChange={v=>setMat({...mat,poids_kg:Number(v)})} required />
-                  <Field label="Volume (m³)" value={String(mat.volume??0)} type="number" onChange={v=>setMat({...mat,volume:Number(v)})} />
-                </div>
-                <Field label="Destination" value={mat.destination} onChange={v=>setMat({...mat,destination:v})} required mono />
-                <Field label="Expéditeur — nom" value={mat.expediteur_nom} onChange={v=>setMat({...mat,expediteur_nom:v})} required mono />
-                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 16px' }}>
-                  <Field label="Fonction expéditeur" value={mat.expediteur_fonction} onChange={v=>setMat({...mat,expediteur_fonction:v})} required mono />
-                  <Field label="Tél expéditeur" value={mat.expediteur_tel} onChange={v=>setMat({...mat,expediteur_tel:v})} required mono placeholder="+237XXXXXXXXX" />
-                </div>
-                {mat.type_mission_log === 'SENSIBLE_CEMAA' && (
-                  <div style={{ padding:'8px 12px', background:`${C.amber}12`, border:`1px solid ${C.amber}`,
-                    borderRadius:3, fontSize:10, fontFamily:C.mono, color:C.amber, marginBottom:12 }}>
-                    ⬡ SENSIBLE CEMAA — Validation CEMAA requise avant COMBASE
-                  </div>
-                )}
-                <button onClick={handleAddMat} disabled={savingMat} style={{
-                  width:'100%', padding:'10px', background:C.greenDim, border:`1px solid ${C.green}`,
-                  borderRadius:3, color:C.green, fontSize:10, fontFamily:C.mono,
-                  letterSpacing:'0.2em', cursor:'pointer', textTransform:'uppercase' as const,
-                  display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}>
-                  {savingMat ? <>
-                    <div style={{ width:12, height:12, border:`2px solid ${C.textMute}`, borderTopColor:C.green,
-                      borderRadius:'50%', animation:'spin 0.8s linear infinite' }} />AJOUT…
-                  </> : '+ AJOUTER CE MATÉRIEL'}
-                </button>
-              </div>
-            </Panel>
-
-            <Panel>
-              <PH title={`Liste Matériels (${manifeste.materiels?.length??0})`} sub="Chargement" />
-              <div style={{ maxHeight:600, overflowY:'auto' }}>
-                {!manifeste.materiels?.length ? (
-                  <div style={{ padding:40, textAlign:'center', fontSize:10, fontFamily:C.mono,
-                    color:C.textMute, letterSpacing:'0.15em' }}>AUCUN MATÉRIEL</div>
-                ) : manifeste.materiels.map((m,i)=>(
-                  <div key={m.id??i} style={{ padding:'10px 18px', borderBottom:`1px solid ${C.border}55` }}>
-                    <div style={{ display:'flex', justifyContent:'space-between', marginBottom:4 }}>
-                      <span style={{ fontSize:12, fontFamily:C.display, fontWeight:600, color:C.text }}>
-                        {m.designation}
-                      </span>
-                      <div style={{ display:'flex', gap:5 }}>
-                        {m.verrouille && <span style={{ fontSize:8, fontFamily:C.mono, color:C.amber, border:`1px solid ${C.amber}`, borderRadius:2, padding:'0 4px' }}>🔒 CEMAA</span>}
-                        <span style={{ fontSize:9, fontFamily:C.mono, color:C.textDim }}>{m.type_mission_log}</span>
-                      </div>
-                    </div>
-                    <div style={{ fontSize:9, fontFamily:C.mono, color:C.textDim, display:'flex', gap:16 }}>
-                      <span>{m.poids_kg} kg</span>
-                      <span>→ {m.destination}</span>
-                      <span>{m.proprietaire}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </Panel>
-          </div>
-        )}
-
-        {/* ONGLET RÉCAPITULATIF */}
-        {tab === 'recap' && (
-          <Panel style={{ animation:'fadeUp 0.2s ease forwards' }}>
-            <PH title="Récapitulatif du Manifeste" sub="Avant soumission" />
-            <div style={{ padding:'20px 24px' }}>
-              <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:16, marginBottom:24 }}>
-                {[
-                  { label:'Passagers', value:manifeste.passagers?.length??0, color:C.blue },
-                  { label:'Matériels', value:manifeste.materiels?.length??0, color:C.textDim },
-                  { label:'Masse totale',
-                    value:`${(manifeste.passagers?.reduce((s,p)=>s+Number(p.masse_bagages_kg),0)??0).toFixed(1)}kg`,
-                    color:C.green },
-                  { label:'Version', value:`v${manifeste.version}`, color:C.textDim },
-                ].map(s=>(
-                  <div key={s.label} style={{ padding:'14px 16px', background:`${C.border}80`, borderRadius:3 }}>
-                    <div style={{ fontSize:9, fontFamily:C.mono, color:C.textDim, letterSpacing:'0.2em',
-                      textTransform:'uppercase' as const, marginBottom:6 }}>{s.label}</div>
-                    <div style={{ fontSize:22, fontFamily:C.mono, fontWeight:600, color:s.color }}>{s.value}</div>
-                  </div>
-                ))}
-              </div>
-
-              {manifeste.statut === 'BROUILLON' && (
-                <div style={{ padding:'16px', background:`${C.green}08`, border:`1px solid ${C.greenDim}`,
-                  borderRadius:3, marginBottom:16 }}>
-                  <div style={{ fontSize:10, fontFamily:C.mono, color:C.green, letterSpacing:'0.08em',
-                    marginBottom:8 }}>✓ PRÊT POUR SOUMISSION</div>
-                  <div style={{ fontSize:10, fontFamily:C.mono, color:C.textDim, lineHeight:1.6 }}>
-                    La soumission lancera le circuit : COMESO → COMGMO → COMBORD → COMBASE
-                    {manifeste.flag_sensible && ' → CEMAA (vol sensible)'}.
-                  </div>
-                </div>
-              )}
-
-              {manifeste.statut === 'BROUILLON' && (
-                <button onClick={handleSoumettre} disabled={submitting} style={{
-                  padding:'12px 32px', background:C.greenDim, border:`1px solid ${C.green}`,
-                  borderRadius:3, color:C.green, fontSize:11, fontFamily:C.mono,
-                  letterSpacing:'0.2em', cursor:'pointer', textTransform:'uppercase' as const,
-                  display:'flex', alignItems:'center', gap:10 }}>
-                  {submitting ? 'SOUMISSION EN COURS…' : '↗ SOUMETTRE AU CIRCUIT DE VALIDATION'}
-                </button>
-              )}
-            </div>
-          </Panel>
-        )}
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <span style={{ fontSize: 11, fontWeight: 600, color: statusColor(manifeste.statut),
+            background: `${statusColor(manifeste.statut)}18`, border: `1px solid ${statusColor(manifeste.statut)}40`,
+            borderRadius: 6, padding: '5px 12px', textTransform: 'uppercase' }}>
+            {manifeste.statut.replace('_', ' ')}
+          </span>
+          <button onClick={() => setShowPrint(true)} style={{
+            padding: '8px 18px', background: T.bgAlt,
+            border: `1px solid ${T.border}`, borderRadius: 6,
+            color: T.textSub, fontSize: 13, cursor: 'pointer'
+          }}>
+            🖨 Imprimer
+          </button>
+          {!readOnly && (
+            <button onClick={handleSoumettre} disabled={submitting} style={{
+              padding: '8px 20px', background: T.green, border: 'none', borderRadius: 6,
+              color: '#fff', fontSize: 13, fontWeight: 600, cursor: submitting ? 'not-allowed' : 'pointer' }}>
+              {submitting ? 'Soumission…' : 'Soumettre ↗'}
+            </button>
+            
+          )}
+        </div>
       </div>
+
+      {/* Onglets */}
+      <div style={{ display: 'flex', gap: 2, marginBottom: 16,
+        borderBottom: `2px solid ${T.border}` }}>
+        {(['passagers', 'materiels', 'recap'] as const).map(t => (
+          <button key={t} onClick={() => setTab(t)} style={{
+            padding: '10px 20px', background: 'transparent',
+            border: 'none', borderBottom: tab === t ? `2px solid ${T.green}` : '2px solid transparent',
+            color: tab === t ? T.green : T.textSub, fontSize: 13,
+            fontWeight: tab === t ? 600 : 400, cursor: 'pointer', marginBottom: -2,
+            transition: 'all 0.15s',
+          }}>
+            {t === 'passagers' ? `Passagers (${manifeste.passagers?.length ?? 0})` :
+             t === 'materiels' ? `Matériels (${manifeste.materiels?.length ?? 0})` : 'Récapitulatif'}
+          </button>
+        ))}
+      </div>
+
+      {/* Onglet passagers */}
+      {tab === 'passagers' && (
+        <div style={{ display: 'grid', gridTemplateColumns: readOnly ? '1fr' : '1fr 1fr', gap: 16 }}>
+          {!readOnly && (
+            <Card style={{ padding: '20px 24px' }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 16 }}>
+                Ajouter un passager
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
+                <Field label="Nom" value={pax.nom} onChange={v => setPax({...pax,nom:v})} required />
+                <Field label="Prénom(s)" value={pax.prenom} onChange={v => setPax({...pax,prenom:v})} required />
+                <Field label="Grade" value={pax.grade??''} onChange={v => setPax({...pax,grade:v})} />
+                <Field label="Catégorie" value={pax.categorie} onChange={v => setPax({...pax,categorie:v})} required
+                  options={CATEGORIES.map(c => ({ value:c, label:c.replace('_',' ') }))} />
+                <Field label="Matricule" value={pax.matricule??''} onChange={v => setPax({...pax,matricule:v})} />
+                <Field label="Unité" value={pax.unite??''} onChange={v => setPax({...pax,unite:v})} />
+              </div>
+              <Field label="Destination finale" value={pax.destination} onChange={v => setPax({...pax,destination:v})} required />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0 16px' }}>
+                <Field label="Nb bagages" value={String(pax.nb_bagages)} type="number" onChange={v => setPax({...pax,nb_bagages:Number(v)})} required />
+                <Field label="Masse (kg)" value={String(pax.masse_bagages_kg)} type="number" onChange={v => setPax({...pax,masse_bagages_kg:Number(v)})} required />
+                <Field label="Couleur bagages" value={pax.couleur_bagages??''} onChange={v => setPax({...pax,couleur_bagages:v})} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
+                <Field label="Contact urgence — nom" value={pax.contact_urgence_nom} onChange={v => setPax({...pax,contact_urgence_nom:v})} required />
+                <Field label="Contact urgence — tél" value={pax.contact_urgence_tel} onChange={v => setPax({...pax,contact_urgence_tel:v})} required placeholder="+237XXXXXXXXX" />
+              </div>
+              <Field label="Réf. autorisation" value={pax.ref_autorisation??''} onChange={v => setPax({...pax,ref_autorisation:v})} />
+              {pax.categorie === 'EVASAN' && (
+                <div style={{ padding: '8px 12px', background: T.redBg, border: `1px solid ${T.redBorder}`,
+                  borderRadius: 6, fontSize: 12, color: T.red, marginBottom: 12 }}>
+                  ✚ EVASAN — circuit accéléré activé à la soumission
+                </div>
+              )}
+              {pax.categorie === 'VIP' && (
+                <div style={{ padding: '8px 12px', background: T.amberBg, border: `1px solid ${T.amberBorder}`,
+                  borderRadius: 6, fontSize: 12, color: T.amber, marginBottom: 12 }}>
+                  ◆ VIP — notification COMBASE + CEMAA automatique
+                </div>
+              )}
+              <button onClick={handleAddPax} disabled={savingPax} style={{
+                width: '100%', padding: '10px', background: T.green, border: 'none',
+                borderRadius: 6, color: '#fff', fontSize: 13, fontWeight: 600,
+                cursor: savingPax ? 'not-allowed' : 'pointer' }}>
+                {savingPax ? 'Ajout…' : '+ Ajouter ce passager'}
+              </button>
+            </Card>
+          )}
+          <Card>
+            <div style={{ padding: '14px 20px', borderBottom: `1px solid ${T.border}`,
+              fontSize: 13, fontWeight: 600, color: T.text }}>
+              Liste des passagers ({manifeste.passagers?.length ?? 0})
+            </div>
+            <div style={{ maxHeight: 520, overflowY: 'auto' }}>
+              {!manifeste.passagers?.length ? (
+                <div style={{ padding: 40, textAlign: 'center', color: T.textDim }}>Aucun passager</div>
+              ) : manifeste.passagers.map((p, i) => (
+                <div key={p.id ?? i} style={{ padding: '12px 20px',
+                  borderBottom: `1px solid ${T.border}` }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: T.text }}>
+                      {p.grade && <span style={{ color: T.textDim, marginRight: 6 }}>{p.grade}</span>}
+                      {p.nom} {p.prenom}
+                    </span>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      {p.verrouille && <span style={{ fontSize: 10, color: T.amber, background: T.amberBg,
+                        border: `1px solid ${T.amberBorder}`, borderRadius: 4, padding: '1px 5px' }}>🔒 CEMAA</span>}
+                      <span style={{ fontSize: 10, color: T.textDim, background: T.bgAlt,
+                        borderRadius: 4, padding: '1px 5px' }}>{p.categorie}</span>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 12, color: T.textDim, display: 'flex', gap: 16 }}>
+                    <span>→ {p.destination}</span>
+                    <span>{p.nb_bagages} bag. · {p.masse_bagages_kg} kg</span>
+                    {p.matricule && <span>Mat: {p.matricule}</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Onglet matériels */}
+      {tab === 'materiels' && (
+        <div style={{ display: 'grid', gridTemplateColumns: readOnly ? '1fr' : '1fr 1fr', gap: 16 }}>
+          {!readOnly && (
+            <Card style={{ padding: '20px 24px' }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 16 }}>Ajouter un matériel</div>
+              <Field label="Désignation" value={mat.designation} onChange={v => setMat({...mat,designation:v})} required />
+              <Field label="Type logistique" value={mat.type_mission_log} onChange={v => setMat({...mat,type_mission_log:v})} required
+                options={TYPES_LOG.map(t => ({ value:t, label:t.replace('_',' ') }))} />
+              <Field label="Propriétaire / Unité" value={mat.proprietaire} onChange={v => setMat({...mat,proprietaire:v})} required />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
+                <Field label="Poids (kg)" value={String(mat.poids_kg)} type="number" onChange={v => setMat({...mat,poids_kg:Number(v)})} required />
+                <Field label="Volume (m³)" value={String(mat.volume??0)} type="number" onChange={v => setMat({...mat,volume:Number(v)})} />
+              </div>
+              <Field label="Destination" value={mat.destination} onChange={v => setMat({...mat,destination:v})} required />
+              <Field label="Expéditeur — nom" value={mat.expediteur_nom} onChange={v => setMat({...mat,expediteur_nom:v})} required />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
+                <Field label="Fonction" value={mat.expediteur_fonction} onChange={v => setMat({...mat,expediteur_fonction:v})} required />
+                <Field label="Téléphone" value={mat.expediteur_tel} onChange={v => setMat({...mat,expediteur_tel:v})} required placeholder="+237XXXXXXXXX" />
+              </div>
+              <button onClick={handleAddMat} disabled={savingMat} style={{
+                width: '100%', padding: '10px', background: T.green, border: 'none',
+                borderRadius: 6, color: '#fff', fontSize: 13, fontWeight: 600,
+                cursor: savingMat ? 'not-allowed' : 'pointer' }}>
+                {savingMat ? 'Ajout…' : '+ Ajouter ce matériel'}
+              </button>
+            </Card>
+          )}
+          <Card>
+            <div style={{ padding: '14px 20px', borderBottom: `1px solid ${T.border}`,
+              fontSize: 13, fontWeight: 600, color: T.text }}>
+              Liste des matériels ({manifeste.materiels?.length ?? 0})
+            </div>
+            <div style={{ maxHeight: 520, overflowY: 'auto' }}>
+              {!manifeste.materiels?.length ? (
+                <div style={{ padding: 40, textAlign: 'center', color: T.textDim }}>Aucun matériel</div>
+              ) : manifeste.materiels.map((m, i) => (
+                <div key={m.id ?? i} style={{ padding: '12px 20px', borderBottom: `1px solid ${T.border}` }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{m.designation}</span>
+                    <span style={{ fontSize: 10, color: T.textDim, background: T.bgAlt,
+                      borderRadius: 4, padding: '1px 5px' }}>{m.type_mission_log}</span>
+                  </div>
+                  <div style={{ fontSize: 12, color: T.textDim, display: 'flex', gap: 16 }}>
+                    <span>{m.poids_kg} kg</span>
+                    <span>→ {m.destination}</span>
+                    <span>{m.proprietaire}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Récapitulatif */}
+      {tab === 'recap' && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          <Card style={{ padding: '20px 24px' }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 16 }}>Synthèse</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              {[
+                { l:'Passagers', v: manifeste.passagers?.length ?? 0, c: T.blue },
+                { l:'Matériels', v: manifeste.materiels?.length ?? 0, c: T.textSub },
+                { l:'Masse bagages', v: `${(manifeste.passagers?.reduce((s,p)=>s+Number(p.masse_bagages_kg),0)??0).toFixed(1)} kg`, c: T.green },
+                { l:'Version', v: `v${manifeste.version}`, c: T.textDim },
+              ].map(s => (
+                <div key={s.l} style={{ padding: '12px 16px', background: T.bgAlt,
+                  borderRadius: 6, textAlign: 'center' }}>
+                  <div style={{ fontSize: 10, color: T.textDim, textTransform: 'uppercase',
+                    letterSpacing: '0.08em', marginBottom: 6 }}>{s.l}</div>
+                  <div style={{ fontSize: 24, fontWeight: 700, color: s.c }}>{s.v}</div>
+                </div>
+              ))}
+            </div>
+          </Card>
+          <Card style={{ padding: '20px 24px' }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 16 }}>
+              Circuit de validation
+            </div>
+            {['COMESO','COMGMO','COMBORD','COMBASE'].map((etape, i) => {
+              const v = manifeste.validations?.find(x => x.etape === etape);
+              const col = !v ? T.textMute : v.statut === 'APPROUVE' ? T.green : v.statut === 'REJETE' ? T.red : T.amberLight;
+              return (
+                <div key={etape} style={{ display: 'flex', alignItems: 'center', gap: 12,
+                  padding: '10px 0', borderBottom: i < 3 ? `1px solid ${T.border}` : 'none' }}>
+                  <div style={{ width: 28, height: 28, borderRadius: '50%', background: `${col}20`,
+                    border: `2px solid ${col}`, display: 'flex', alignItems: 'center',
+                    justifyContent: 'center', fontSize: 11, fontWeight: 700, color: col }}>
+                    {!v ? i+1 : v.statut === 'APPROUVE' ? '✓' : v.statut === 'REJETE' ? '✗' : '…'}
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: T.text }}>{etape}</div>
+                    <div style={{ fontSize: 11, color: col }}>
+                      {!v ? 'En attente' : v.statut === 'APPROUVE' ? 'Validé' : v.statut === 'REJETE' ? 'Rejeté' : 'En cours'}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            {!readOnly && (
+              <button onClick={handleSoumettre} disabled={submitting} style={{
+                width: '100%', marginTop: 16, padding: '10px', background: T.green,
+                border: 'none', borderRadius: 6, color: '#fff', fontSize: 13,
+                fontWeight: 600, cursor: submitting ? 'not-allowed' : 'pointer' }}>
+                {submitting ? 'Soumission…' : '↗ Soumettre au circuit de validation'}
+              </button>
+            )}
+          </Card>
+        </div>
+      )}
+    {/* Modal impression */}
+      {showPrint && manifeste && (
+        <ManifestePrint
+          manifeste={manifeste}
+          onClose={() => setShowPrint(false)}
+        />
+      )}
     </div>
   );
 }
 
-// ─── ROUTER MANIFESTES ────────────────────────────────────────────────────────
 export default function ManifestesPage(): React.ReactElement {
   return (
     <Routes>
