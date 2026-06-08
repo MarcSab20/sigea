@@ -1,59 +1,72 @@
-// apps/auth-service/src/auth/auth.controller.ts
-import { Controller, Post, Body, HttpCode, HttpStatus, UseGuards, Req } from '@nestjs/common';
+import { Controller, Post, Body, HttpCode, HttpStatus, Req } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
+import { Request } from 'express';
 import { AuthService } from './auth.service';
-import { IsString, MinLength, Length } from 'class-validator';
+import { IsString, MinLength, Length, IsOptional, IsBoolean } from 'class-validator';
+
+function ctxFrom(req: Request) {
+  return {
+    ip: (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ?? req.ip,
+    fingerprint: req.headers['x-device-fingerprint'] as string | undefined,
+    userAgent: req.headers['user-agent'] as string | undefined,
+  };
+}
 
 class LoginDto {
   @IsString() login!: string;
   @IsString() @MinLength(1) password!: string;
+  @IsOptional() @IsBoolean() first_connection?: boolean;
 }
-
-class VerifyOtpDto {
+class OtpDto {
   @IsString() challenge_token!: string;
   @IsString() @Length(6, 6) otp_code!: string;
 }
-
-class ActivateOtpDto {
+class BackupDto {
   @IsString() challenge_token!: string;
-  @IsString() @Length(6, 6) otp_code!: string;
+  @IsString() backup_code!: string;
 }
 
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
-  // Étape 1 — login (identifiants)
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  login(@Body() dto: LoginDto) {
-    return this.authService.login(dto.login, dto.password);
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  login(@Body() dto: LoginDto, @Req() req: Request) {
+    return this.authService.login(dto.login, dto.password, dto.first_connection ?? false, ctxFrom(req));
   }
 
-  // Étape 2a — vérifier OTP (connexions suivantes)
   @Post('verify-otp')
   @HttpCode(HttpStatus.OK)
-  verifyOtp(@Body() dto: VerifyOtpDto) {
-    return this.authService.verifyOtp(dto.challenge_token, dto.otp_code);
+  @Throttle({ default: { limit: 8, ttl: 60_000 } })
+  verifyOtp(@Body() dto: OtpDto, @Req() req: Request) {
+    return this.authService.verifyOtp(dto.challenge_token, dto.otp_code, ctxFrom(req));
   }
 
-  // Étape 2b — activer OTP après scan QR (première connexion)
   @Post('activate-otp')
   @HttpCode(HttpStatus.OK)
-  activateOtp(@Body() dto: ActivateOtpDto) {
-    return this.authService.activateAndVerifyOtp(dto.challenge_token, dto.otp_code);
+  @Throttle({ default: { limit: 8, ttl: 60_000 } })
+  activateOtp(@Body() dto: OtpDto, @Req() req: Request) {
+    return this.authService.activateAndVerifyOtp(dto.challenge_token, dto.otp_code, ctxFrom(req));
   }
 
-  // Logout — invalider le refresh token côté serveur
-  @Post('logout')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  logout() {
-    return { success: true };
+  @Post('verify-backup-code')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  verifyBackup(@Body() dto: BackupDto, @Req() req: Request) {
+    return this.authService.verifyBackupCode(dto.challenge_token, dto.backup_code, ctxFrom(req));
   }
 
-  // Refresh token
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   refresh(@Body() body: { refresh_token: string }) {
     return this.authService.refresh(body.refresh_token);
+  }
+
+  @Post('logout')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  logout() {
+    return { success: true };
   }
 }

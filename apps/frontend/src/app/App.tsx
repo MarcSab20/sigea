@@ -10,6 +10,7 @@ import ValidationsPage from './validations/ValidationsPage';
 import CemaaPage from './cemaa/CemaaPage';
 import AdminPage from './admin/AdminPage';
 import Layout from '@/components/Layout';
+import ProfilePage from './profile/ProfilePage';
 
 function PrivateRoute({ children }: { children: React.ReactNode }): React.ReactElement {
   const { user } = useAuthStore();
@@ -26,6 +27,7 @@ export default function App(): React.ReactElement {
       <Route path="/validations" element={<PrivateRoute><ValidationsPage /></PrivateRoute>} />
       <Route path="/cemaa/*" element={<PrivateRoute><CemaaPage /></PrivateRoute>} />
       <Route path="/admin/*" element={<PrivateRoute><AdminPage /></PrivateRoute>} />
+      <Route path="/profile" element={<PrivateRoute><ProfilePage /></PrivateRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

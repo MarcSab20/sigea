@@ -1,76 +1,61 @@
-// apps/auth-service/src/otp/otp.service.ts
 import { Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '@sigea/shared-database';
+import { CemaaCryptoService } from '@sigea/shared-crypto';
+import { EncryptedPayload } from '@sigea/shared-types';
 import * as crypto from 'crypto';
+import * as QRCode from 'qrcode';
 
-// Implémentation TOTP RFC 6238 sans dépendance externe fragile
-// Compatible avec Google Authenticator, Authy, Microsoft Authenticator
+const BASE32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+const PERIOD = 60;
+const DIGITS = 6;
+const DRIFT = 1;
 
-const BASE32_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-
-function base32Decode(encoded: string): Buffer {
-  let bits = 0;
-  let value = 0;
-  let index = 0;
-  const output = Buffer.alloc(Math.floor((encoded.length * 5) / 8));
-  for (const char of encoded.toUpperCase().replace(/=+$/, '')) {
-    const charIndex = BASE32_CHARS.indexOf(char);
-    if (charIndex === -1) continue;
-    value = (value << 5) | charIndex;
-    bits += 5;
-    if (bits >= 8) {
-      output[index++] = (value >>> (bits - 8)) & 0xff;
-      bits -= 8;
-    }
+function base32Decode(s: string): Buffer {
+  let bits = 0, value = 0, idx = 0;
+  const out = Buffer.alloc(Math.floor((s.length * 5) / 8));
+  for (const c of s.toUpperCase().replace(/=+$/, '')) {
+    const i = BASE32.indexOf(c);
+    if (i === -1) continue;
+    value = (value << 5) | i; bits += 5;
+    if (bits >= 8) { out[idx++] = (value >>> (bits - 8)) & 0xff; bits -= 8; }
   }
-  return output.slice(0, index);
+  return out.subarray(0, idx);
 }
 
 function base32Encode(buf: Buffer): string {
-  let bits = 0;
-  let value = 0;
-  let output = '';
-  for (const byte of buf) {
-    value = (value << 8) | byte;
-    bits += 8;
-    while (bits >= 5) {
-      output += BASE32_CHARS[(value >>> (bits - 5)) & 31];
-      bits -= 5;
+  let bits = 0, value = 0, out = '';
+  for (const b of buf) {
+    value = (value << 8) | b; bits += 8;
+    while (bits >= 5) { out += BASE32[(value >>> (bits - 5)) & 31]; bits -= 5; }
+  }
+  if (bits > 0) out += BASE32[(value << (5 - bits)) & 31];
+  return out;
+}
+
+function hotp(secret: string, counter: number): string {
+  const key = base32Decode(secret);
+  const buf = Buffer.alloc(8);
+  buf.writeBigInt64BE(BigInt(counter));
+  const hmac = crypto.createHmac('sha1', key).update(buf).digest();
+  const off = hmac[hmac.length - 1] & 0x0f;
+  const code = ((hmac[off] & 0x7f) << 24) | ((hmac[off + 1] & 0xff) << 16)
+    | ((hmac[off + 2] & 0xff) << 8) | (hmac[off + 3] & 0xff);
+  return String(code % 10 ** DIGITS).padStart(DIGITS, '0');
+}
+
+function totp(secret: string, window = 0): string {
+  return hotp(secret, Math.floor(Date.now() / 1000 / PERIOD) + window);
+}
+
+function verifyTotp(secret: string, token: string): boolean {
+  const clean = token.replace(/\s/g, '');
+  for (let w = -DRIFT; w <= DRIFT; w++) {
+    if (crypto.timingSafeEqual(Buffer.from(totp(secret, w)), Buffer.from(clean.padStart(DIGITS, '0')))) {
+      return true;
     }
   }
-  if (bits > 0) output += BASE32_CHARS[(value << (5 - bits)) & 31];
-  while (output.length % 8 !== 0) output += '=';
-  return output;
-}
-
-function generateHOTP(secret: string, counter: number): string {
-  const key = base32Decode(secret);
-  const counterBuf = Buffer.alloc(8);
-  counterBuf.writeBigInt64BE(BigInt(counter));
-  const hmac = crypto.createHmac('sha1', key).update(counterBuf).digest();
-  const offset = hmac[hmac.length - 1] & 0x0f;
-  const code = ((hmac[offset] & 0x7f) << 24) |
-    ((hmac[offset + 1] & 0xff) << 16) |
-    ((hmac[offset + 2] & 0xff) << 8) |
-    (hmac[offset + 3] & 0xff);
-  return String(code % 1_000_000).padStart(6, '0');
-}
-
-function generateTOTP(secret: string, window = 0): string {
-  const counter = Math.floor(Date.now() / 1000 / 30) + window;
-  return generateHOTP(secret, counter);
-}
-
-function verifyTOTP(secret: string, token: string, drift = 1): boolean {
-  for (let w = -drift; w <= drift; w++) {
-    if (generateTOTP(secret, w) === token) return true;
-  }
   return false;
-}
-
-function generateSecret(): string {
-  return base32Encode(crypto.randomBytes(20));
 }
 
 @Injectable()
@@ -80,71 +65,71 @@ export class OtpService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly crypto: CemaaCryptoService,
   ) {
     this.appName = config.get<string>('APP_NAME') ?? 'SIGEA-FAC';
   }
 
-  // Génère un nouveau secret TOTP pour un utilisateur (première connexion)
-  async generateSecret(userId: string): Promise<{ secret: string; otpAuthUrl: string; qrDataUrl: string }> {
-    const secret = generateSecret();
+  private key(): Buffer {
+    const hex = process.env.MFA_ENCRYPTION_KEY ?? '';
+    const buf = Buffer.from(hex, 'hex');
+    if (buf.length !== 32) throw new Error('MFA_ENCRYPTION_KEY invalide (32 octets hex requis)');
+    return buf;
+  }
 
-    // Récupérer l'utilisateur pour le label
+  private encryptSecret(secret: string): string {
+    return JSON.stringify(this.crypto.encrypt(secret, this.key()));
+  }
+
+  private decryptSecret(stored: string): string {
+    return this.crypto.decrypt(JSON.parse(stored) as EncryptedPayload, this.key());
+  }
+
+  async generateSecret(userId: string): Promise<{ secret: string; otpAuthUrl: string; qrDataUrl: string }> {
+    const secret = base32Encode(crypto.randomBytes(20));
     const user = await this.prisma.utilisateur.findUnique({
-      where: { id: userId },
-      select: { login: true, nom: true, prenom: true },
+      where: { id: userId }, select: { login: true },
     });
     if (!user) throw new BadRequestException('Utilisateur introuvable');
 
     const label = encodeURIComponent(`${this.appName}:${user.login}`);
     const issuer = encodeURIComponent(this.appName);
-    const otpAuthUrl = `otpauth://totp/${label}?secret=${secret}&issuer=${issuer}&algorithm=SHA1&digits=6&period=30`;
+    const otpAuthUrl =
+      `otpauth://totp/${label}?secret=${secret}&issuer=${issuer}&algorithm=SHA1&digits=${DIGITS}&period=${PERIOD}`;
 
-    // Stocker le secret en attente (pas encore activé)
     await this.prisma.otpSecret.upsert({
       where: { user_id: userId },
-      update: { secret, actif: false },
-      create: { user_id: userId, secret, actif: false },
+      update: { secret: this.encryptSecret(secret), actif: false },
+      create: { user_id: userId, secret: this.encryptSecret(secret), actif: false },
     });
 
-    // Générer QR code en SVG pur (sans librairie externe)
-    const qrDataUrl = await this.generateQrDataUrl(otpAuthUrl);
-
+    const qrDataUrl = await QRCode.toDataURL(otpAuthUrl, { margin: 1, width: 220, errorCorrectionLevel: 'M' });
     return { secret, otpAuthUrl, qrDataUrl };
   }
 
-  // Active le secret après vérification du premier code
   async activateSecret(userId: string, token: string): Promise<void> {
-    const otpRecord = await this.prisma.otpSecret.findUnique({ where: { user_id: userId } });
-    if (!otpRecord) throw new BadRequestException('Aucun secret en attente');
-
-    if (!verifyTOTP(otpRecord.secret, token)) {
+    const rec = await this.prisma.otpSecret.findUnique({ where: { user_id: userId } });
+    if (!rec) throw new BadRequestException('Aucun secret en attente');
+    if (!verifyTotp(this.decryptSecret(rec.secret), token)) {
       throw new UnauthorizedException('Code OTP invalide');
     }
-
-    await this.prisma.otpSecret.update({
-      where: { user_id: userId },
-      data: { actif: true },
-    });
+    await this.prisma.otpSecret.update({ where: { user_id: userId }, data: { actif: true } });
+    await this.prisma.utilisateur.update({ where: { id: userId }, data: { mfa_enrolled: true } });
   }
 
-  // Vérifie un token TOTP lors de la connexion
   async verifyToken(userId: string, token: string): Promise<boolean> {
-    const otpRecord = await this.prisma.otpSecret.findUnique({ where: { user_id: userId } });
-    if (!otpRecord?.actif) return false;
-    return verifyTOTP(otpRecord.secret, token.replace(/\s/g, ''));
+    const rec = await this.prisma.otpSecret.findUnique({ where: { user_id: userId } });
+    if (!rec?.actif) return false;
+    return verifyTotp(this.decryptSecret(rec.secret), token);
   }
 
-  // Vérifie si l'utilisateur a un secret TOTP actif
   async hasActiveSecret(userId: string): Promise<boolean> {
-    const r = await this.prisma.otpSecret.findUnique({ where: { user_id: userId } });
-    return r?.actif === true;
+    const rec = await this.prisma.otpSecret.findUnique({ where: { user_id: userId } });
+    return rec?.actif === true;
   }
 
-  // Génère un QR code via l'API publique QR Server (en prod : générer localement)
-  private async generateQrDataUrl(otpAuthUrl: string): Promise<string> {
-    // Retourne l'URL de l'API QR — le frontend l'affiche directement
-    // En production intranet : utiliser qrcode npm ou générer en SVG natif
-    const encoded = encodeURIComponent(otpAuthUrl);
-    return `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encoded}`;
+  async reset(userId: string): Promise<void> {
+    await this.prisma.otpSecret.deleteMany({ where: { user_id: userId } });
+    await this.prisma.utilisateur.update({ where: { id: userId }, data: { mfa_enrolled: false } });
   }
 }

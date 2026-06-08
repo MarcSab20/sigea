@@ -126,6 +126,18 @@ model Utilisateur {
   audits          AuditLog[]
   otp_secret      OtpSecret?
   challenge_token ChallengeToken?
+  email               String?
+  mfa_enrolled        Boolean   @default(false)
+  verrouille_securite Boolean   @default(false)
+  motif_verrouillage  String?
+  last_login_ip       String?
+  last_login_at       DateTime?
+  notif_connexion     Boolean   @default(true)
+  notif_par_email     Boolean   @default(false)
+  backup_codes        BackupCode[]
+  known_devices       KnownDevice[]
+  security_notifs     SecurityNotification[]
+  mfa_reset_requests  MfaResetRequest[]
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
@@ -374,4 +386,61 @@ model AuditLog {
   timestamp    DateTime    @default(now())
 
   @@index([user_id, timestamp])
+}
+
+model BackupCode {
+  id          String      @id @default(uuid())
+  user_id     String
+  utilisateur Utilisateur @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  code_hash   String
+  used        Boolean     @default(false)
+  used_at     DateTime?
+  created_at  DateTime    @default(now())
+
+  @@index([user_id, used])
+  @@map("backup_codes")
+}
+
+model KnownDevice {
+  id           String      @id @default(uuid())
+  user_id      String
+  utilisateur  Utilisateur @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  fingerprint  String
+  user_agent   String?
+  ip           String?
+  derniere_vue DateTime    @default(now())
+  created_at   DateTime    @default(now())
+
+  @@unique([user_id, fingerprint])
+  @@map("known_devices")
+}
+
+model SecurityNotification {
+  id          String      @id @default(uuid())
+  user_id     String
+  utilisateur Utilisateur @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  type        String
+  niveau      String      @default("INFO")
+  message     String
+  ip          String?
+  lu          Boolean     @default(false)
+  created_at  DateTime    @default(now())
+
+  @@index([user_id, lu])
+  @@index([niveau])
+  @@map("security_notifications")
+}
+
+model MfaResetRequest {
+  id          String      @id @default(uuid())
+  user_id     String
+  utilisateur Utilisateur @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  motif       String?
+  statut      String      @default("EN_ATTENTE")
+  traite_par  String?
+  traite_le   DateTime?
+  created_at  DateTime    @default(now())
+
+  @@index([statut])
+  @@map("mfa_reset_requests")
 }

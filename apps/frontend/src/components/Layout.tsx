@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { path: '/validations', label: 'Validations',      icon: '✓'  },
   { path: '/cemaa',       label: 'Espace CEMAA',     icon: '⬡'  },
   { path: '/admin',       label: 'Administration',   icon: '⚙'  },
+  { path: '/profile', label: 'Mon profil', icon: '👤' },
 ];
 
 export default function Layout({ children }: { children: React.ReactNode }): React.ReactElement {

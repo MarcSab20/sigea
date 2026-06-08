@@ -7,10 +7,20 @@ export const api = axios.create({
   withCredentials: true, // cookies HttpOnly pour refresh token
 });
 
+function deviceFingerprint(): string {
+  let id = localStorage.getItem('sigea-device-id');
+  if (!id) {
+    id = (crypto.randomUUID?.() ?? Math.random().toString(36).slice(2) + Date.now());
+    localStorage.setItem('sigea-device-id', id);
+  }
+  return id;
+}
+
 // Intercepteur : injecter le token JWT
 api.interceptors.request.use(config => {
   const token = useAuthStore.getState().accessToken;
   if (token) config.headers.Authorization = `Bearer ${token}`;
+  config.headers['x-device-fingerprint'] = deviceFingerprint();
   return config;
 });
 

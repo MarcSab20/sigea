@@ -146,6 +146,7 @@ function StatMini({ label, value, color }: { label: string; value: number | stri
 const ADMIN_TABS = [
   { key: 'utilisateurs', label: 'Utilisateurs',    icon: '👤' },
   { key: 'bases',        label: 'Bases aériennes', icon: '🏛' },
+  { key: 'securite',     label: 'Sécurité MFA',    icon: '🛡' },
   { key: 'audit',        label: 'Journal d\'audit', icon: '📜' },
   { key: 'systeme',      label: 'Système',         icon: '⚙' },
 ];
@@ -829,6 +830,154 @@ function SystemeTab(): React.ReactElement {
   );
 }
 
+// ─── PAGE SÉCURITÉ MFA ─────────────────────────────────────────────────────────
+interface ResetRequest {
+  id: string; user_id: string; motif?: string; statut: string; created_at: string;
+  utilisateur?: { nom: string; prenom: string; login: string; base_id: string };
+}
+interface SecAlert {
+  id: string; user_id: string; type: string; niveau: string; message: string;
+  ip?: string; created_at: string;
+  utilisateur?: { nom: string; prenom: string; login: string; base_id: string };
+}
+
+function SecuriteMfaTab(): React.ReactElement {
+  const [requests, setRequests] = useState<ResetRequest[]>([]);
+  const [alerts, setAlerts] = useState<SecAlert[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const [r, a] = await Promise.all([
+        api.get<ResetRequest[]>('/auth/admin/mfa-reset-requests'),
+        api.get<SecAlert[]>('/auth/admin/security-alerts'),
+      ]);
+      setRequests(r.data); setAlerts(a.data);
+    } catch { toast.error('Erreur de chargement sécurité'); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const act = async (label: string, fn: () => Promise<unknown>): Promise<void> => {
+    setBusy(label);
+    try { await fn(); toast.success('Action effectuée'); await load(); }
+    catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(msg ?? 'Erreur');
+    } finally { setBusy(null); }
+  };
+
+  const niveauColor = (n: string): string =>
+    n === 'CRITIQUE' ? T.red : n === 'ALERTE' ? T.amberLight : T.blue;
+
+  return (
+    <div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12, marginBottom: 20 }}>
+        <StatMini label="Demandes en attente" value={requests.length} color={T.amberLight} />
+        <StatMini label="Alertes critiques" value={alerts.filter(a => a.niveau === 'CRITIQUE').length} color={T.red} />
+        <StatMini label="Alertes totales" value={alerts.length} color={T.blue} />
+      </div>
+
+      {/* Demandes de réinitialisation MFA */}
+      <Card style={{ marginBottom: 16 }}>
+        <div style={{ padding: '14px 20px', borderBottom: `1px solid ${T.border}`,
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>
+            Demandes de réinitialisation MFA ({requests.length})
+          </div>
+          <button onClick={load} style={{ padding: '6px 14px', background: T.bgAlt,
+            border: `1px solid ${T.border}`, borderRadius: 6, color: T.textDim,
+            fontSize: 12, cursor: 'pointer' }}>↻ Actualiser</button>
+        </div>
+        {loading ? (
+          <div style={{ padding: 40, textAlign: 'center', color: T.textDim }}>Chargement…</div>
+        ) : requests.length === 0 ? (
+          <div style={{ padding: 40, textAlign: 'center', color: T.textDim }}>Aucune demande en attente</div>
+        ) : requests.map(r => (
+          <div key={r.id} style={{ padding: '14px 20px', borderBottom: `1px solid ${T.border}`,
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>
+                {r.utilisateur ? `${r.utilisateur.nom} ${r.utilisateur.prenom}` : r.user_id}
+                <span style={{ fontSize: 11, color: T.textDim, marginLeft: 8, fontFamily: T.mono }}>
+                  {r.utilisateur?.login}
+                </span>
+              </div>
+              <div style={{ fontSize: 11, color: T.textDim, marginTop: 2 }}>
+                {r.motif ?? 'Sans motif'} · {new Date(r.created_at).toLocaleString('fr-FR')}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button disabled={busy === r.id}
+                onClick={() => act(r.id, () => api.post(`/auth/admin/mfa-reset-requests/${r.id}/approuver`))}
+                style={{ padding: '6px 14px', background: T.green, border: 'none',
+                  borderRadius: 5, color: '#fff', fontSize: 12, fontWeight: 600,
+                  cursor: 'pointer' }}>Approuver</button>
+              <button disabled={busy === r.id}
+                onClick={() => act(r.id, () => api.post(`/auth/admin/mfa-reset-requests/${r.id}/rejeter`))}
+                style={{ padding: '6px 14px', background: T.redBg,
+                  border: `1px solid ${T.redBorder}`, borderRadius: 5, color: T.red,
+                  fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Rejeter</button>
+            </div>
+          </div>
+        ))}
+      </Card>
+
+      {/* Journal des alertes de sécurité */}
+      <Card>
+        <div style={{ padding: '14px 20px', borderBottom: `1px solid ${T.border}`,
+          fontSize: 13, fontWeight: 600, color: T.text }}>
+          Alertes de sécurité (niveau 1 / critique)
+        </div>
+        {loading ? (
+          <div style={{ padding: 40, textAlign: 'center', color: T.textDim }}>Chargement…</div>
+        ) : alerts.length === 0 ? (
+          <div style={{ padding: 40, textAlign: 'center', color: T.textDim }}>Aucune alerte</div>
+        ) : (
+          <div style={{ maxHeight: 500, overflowY: 'auto' }}>
+            {alerts.map(a => (
+              <div key={a.id} style={{ padding: '12px 20px', borderBottom: `1px solid ${T.border}`,
+                borderLeft: `3px solid ${niveauColor(a.niveau)}`,
+                background: a.niveau === 'CRITIQUE' ? T.redBg : 'transparent' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: niveauColor(a.niveau) }}>
+                      {a.type}
+                    </span>
+                    <span style={{ fontSize: 11, color: T.textSub, marginLeft: 8 }}>
+                      {a.utilisateur ? `${a.utilisateur.nom} ${a.utilisateur.prenom} (${a.utilisateur.login})` : a.user_id}
+                    </span>
+                  </div>
+                  <span style={{ fontSize: 10, color: T.textDim }}>
+                    {new Date(a.created_at).toLocaleString('fr-FR')}
+                  </span>
+                </div>
+                <div style={{ fontSize: 12, color: T.textSub, marginTop: 3 }}>{a.message}</div>
+                <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
+                  {a.ip && <span style={{ fontSize: 10, color: T.textDim, fontFamily: T.mono }}>IP : {a.ip}</span>}
+                  <div style={{ flex: 1 }} />
+                  <button disabled={busy === a.id + 'u'}
+                    onClick={() => act(a.id + 'u', () => api.post(`/auth/admin/utilisateurs/${a.user_id}/deverrouiller`, { motif: 'Levée admin' }))}
+                    style={{ padding: '4px 10px', background: T.greenBg,
+                      border: `1px solid ${T.greenBorder}`, borderRadius: 4, color: T.green,
+                      fontSize: 11, cursor: 'pointer' }}>Déverrouiller</button>
+                  <button disabled={busy === a.id + 'r'}
+                    onClick={() => act(a.id + 'r', () => api.post(`/auth/admin/utilisateurs/${a.user_id}/reset-mfa`))}
+                    style={{ padding: '4px 10px', background: T.amberBg,
+                      border: `1px solid ${T.amberBorder}`, borderRadius: 4, color: T.amber,
+                      fontSize: 11, cursor: 'pointer' }}>Réinitialiser MFA</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
 // ─── PAGE PRINCIPALE ADMIN ────────────────────────────────────────────────────
 export default function AdminPage(): React.ReactElement {
   const [activeTab, setActiveTab] = useState('utilisateurs');
@@ -866,6 +1015,7 @@ export default function AdminPage(): React.ReactElement {
       {/* Contenu */}
       {activeTab === 'utilisateurs' && <UtilisateursTab />}
       {activeTab === 'bases' && <BasesTab />}
+      {activeTab === 'securite' && <SecuriteMfaTab />}
       {activeTab === 'audit' && <AuditTab />}
       {activeTab === 'systeme' && <SystemeTab />}
     </div>
