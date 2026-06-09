@@ -1,10 +1,16 @@
+// apps/manifeste-service/src/manifestes/manifeste.service.ts
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@sigea/shared-database';
-import { StatutManifeste } from '@sigea/shared-types';
+import { StatutManifeste, CategoriePassager } from '@sigea/shared-types';
+import { EVENTS, ALERT_EVENTS } from '@sigea/shared-events';
+import { EventPublisher } from '@sigea/shared-messaging';
 
 @Injectable()
 export class ManifesteService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly events: EventPublisher,
+  ) {}
 
   async create(data: {
     vol_id: string; base_id: string; cree_par: string;
@@ -41,14 +47,39 @@ export class ManifesteService {
   }
 
   async soumettre(id: string, base_id: string): Promise<unknown> {
-    const manifeste = await this.prisma.manifeste.findFirst({ where: { id, base_id } });
+    const manifeste = await this.prisma.manifeste.findFirst({
+      where: { id, base_id },
+      include: {
+        passagers: { select: { categorie: true } },
+        marchandises: { select: { id: true } },
+      },
+    });
     if (!manifeste) throw new NotFoundException();
     if (manifeste.statut !== StatutManifeste.BROUILLON) {
       throw new BadRequestException('Seul un manifeste en brouillon peut être soumis');
     }
-    return this.prisma.manifeste.update({
+
+    const updated = await this.prisma.manifeste.update({
       where: { id },
       data: { statut: StatutManifeste.SOUMIS },
     });
+
+    // ── Publication d'évènements (best-effort, n'interrompt jamais la soumission) ──
+    const ts = new Date().toISOString();
+    const ctx = { manifeste_id: id, base_id: manifeste.base_id, vol_id: manifeste.vol_id, timestamp: ts };
+
+    await this.events.publish(EVENTS.MANIFESTE_SUBMITTED, ctx);
+
+    if (manifeste.passagers.some((p) => p.categorie === CategoriePassager.EVASAN)) {
+      await this.events.publish(ALERT_EVENTS.EVASAN, ctx);
+    }
+    if (manifeste.passagers.some((p) => p.categorie === CategoriePassager.VIP)) {
+      await this.events.publish(ALERT_EVENTS.VIP, ctx);
+    }
+    if (manifeste.marchandises.length > 0) {
+      await this.events.publish(ALERT_EVENTS.DANGEROUS_GOODS, ctx);
+    }
+
+    return updated;
   }
 }

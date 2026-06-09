@@ -1,0 +1,12 @@
+{
+  "name": "shared-messaging",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/shared-messaging/src",
+  "projectType": "library",
+  "targets": {
+    "build": { "executor": "@nx/js:tsc", "options": { "outputPath": "dist/libs/shared-messaging", "main": "libs/shared-messaging/src/index.ts", "tsConfig": "libs/shared-messaging/tsconfig.lib.json", "rootDir": "." } },
+    "test": { "executor": "@nx/jest:jest", "options": { "jestConfig": "libs/shared-messaging/jest.config.ts" } },
+    "lint": { "executor": "@nx/eslint:lint", "options": { "lintFilePatterns": ["libs/shared-messaging/**/*.ts"] } }
+  },
+  "tags": ["type:lib", "scope:shared-messaging"]
+}

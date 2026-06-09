@@ -5,6 +5,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { SharedDatabaseModule } from '@sigea/shared-database';
 import { AuditModule } from '@sigea/shared-audit';
+import { MessagingModule } from '@sigea/shared-messaging';
 import { ManifesteModule } from './manifestes/manifeste.module';
 import { PassagersModule } from './passagers/passagers.module';
 import { MaterielsModule } from './materiels/materiels.module';
@@ -23,6 +24,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     }),
     SharedDatabaseModule,
     AuditModule,
+    MessagingModule,
     ManifesteModule,
     PassagersModule,
     MaterielsModule,

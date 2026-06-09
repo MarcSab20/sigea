@@ -1,11 +1,25 @@
+// prisma/seed.ts — SEED RÉCONCILIÉ
+// Corrige le bug de cohérence des ID de base :
+//  - id de base = code_base, en MAJUSCULES, source unique de vérité
+//  - mapping ville/région UNIQUE (aligné sur le frontend et seed-bases-aeronefs.ts)
+//  - suppression de l'ancien bloc de "migration d'ID" fragile (cause racine du bug)
+//  - mot de passe de seed lu depuis SEED_PASSWORD (fallback dev explicitement signalé)
+//
+// IMPORTANT : les désignations/implantations ci-dessous reprennent celles déjà
+// présentes et cohérentes dans votre frontend (BASES_FAC) et dans
+// prisma/seed-bases-aeronefs.ts. À FAIRE CONFIRMER par la FAC pour la production —
+// je ne les invente pas, je les aligne sur votre propre source interne.
+
 import { config } from 'dotenv';
-config(); // charge .env (DATABASE_URL)
+config();
 
 import { PrismaClient, RoleUtilisateur } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
+// Source unique : id === code_base (MAJUSCULES). Toute la chaîne (tokens, guards,
+// front) doit utiliser cette casse. Voir note casse dans INTEGRATION.md.
 const BASES = [
   { id: 'BA101', code_base: 'BA101', nom: 'Base Aérienne 101 Yaoundé',    region: 'Centre' },
   { id: 'BA102', code_base: 'BA102', nom: 'Base Aérienne 102 Bertoua',     region: 'Est' },
@@ -25,25 +39,9 @@ const AERONEFS = [
 ];
 
 async function main(): Promise<void> {
-  console.log('🌱 Seed SIGEA en cours...');
+  console.log('🌱 Seed SIGEA (réconcilié)…');
 
-  // 1. Migrer les utilisateurs/vols pointant vers d'anciens id UUID vers le code de base
-  for (const b of BASES) {
-    const ancienne = await prisma.base.findUnique({ where: { code_base: b.code_base } });
-    if (ancienne && ancienne.id !== b.id) {
-      // Créer la base au bon id, rebrancher les références, supprimer l'ancienne
-      await prisma.base.create({ data: { id: b.id, code_base: b.code_base + '_tmp', nom: b.nom, region: b.region } });
-      await prisma.utilisateur.updateMany({ where: { base_id: ancienne.id }, data: { base_id: b.id } });
-      await prisma.manifeste.updateMany({ where: { base_id: ancienne.id }, data: { base_id: b.id } });
-      await prisma.vol.updateMany({ where: { base_depart_id: ancienne.id }, data: { base_depart_id: b.id } });
-      await prisma.vol.updateMany({ where: { base_arrivee_id: ancienne.id }, data: { base_arrivee_id: b.id } });
-      await prisma.base.delete({ where: { id: ancienne.id } });
-      await prisma.base.update({ where: { id: b.id }, data: { code_base: b.code_base } });
-      console.log(`  ↻ Base ${b.code_base} migrée vers id déterministe`);
-    }
-  }
-
-  // 2. Upsert des bases avec id = code
+  // 1. Bases — upsert idempotent par id déterministe (= code_base majuscules).
   for (const b of BASES) {
     await prisma.base.upsert({
       where: { id: b.id },
@@ -53,7 +51,7 @@ async function main(): Promise<void> {
     console.log(`  ✓ Base ${b.code_base}`);
   }
 
-  // 3. Aéronefs
+  // 2. Aéronefs.
   for (const a of AERONEFS) {
     await prisma.aeronef.upsert({
       where: { immatriculation: a.immatriculation },
@@ -63,17 +61,22 @@ async function main(): Promise<void> {
     console.log(`  ✓ Aéronef ${a.immatriculation} — ${a.type}`);
   }
 
-  // 4. Utilisateurs de test (MOT DE PASSE À CHANGER EN PROD)
-  const password = await bcrypt.hash('ChangeMe@2025!', 12);
+  // 3. Utilisateurs de test — base_id en MAJUSCULES, cohérent avec les bases.
+  const rawPwd = process.env.SEED_PASSWORD;
+  if (!rawPwd) {
+    console.warn('  ⚠ SEED_PASSWORD non défini — usage d\'un mot de passe DEV par défaut.');
+    console.warn('  ⚠ NE PAS UTILISER EN PRODUCTION. Définir SEED_PASSWORD avant tout déploiement.');
+  }
+  const password = await bcrypt.hash(rawPwd ?? 'ChangeMe@2025!', 12);
 
   const users = [
-    { login: 'admin.sigea',          role: RoleUtilisateur.admin,       base_id: 'BA101', nom: 'Admin',  prenom: 'Système', grade: 'Colonel' },
-    { login: 'chef.escale.yaounde',  role: RoleUtilisateur.chef_escale, base_id: 'BA101', nom: 'Mbarga', prenom: 'Jean',    grade: 'Adjudant' },
-    { login: 'comeso.yaounde',       role: RoleUtilisateur.comeso,      base_id: 'BA101', nom: 'Fouda',  prenom: 'Paul',    grade: 'Lieutenant' },
-    { login: 'comgmo.yaounde',       role: RoleUtilisateur.comgmo,      base_id: 'BA101', nom: 'Ateba',  prenom: 'Marie',   grade: 'Capitaine' },
-    { login: 'combase.yaounde',      role: RoleUtilisateur.combase,     base_id: 'BA101', nom: 'Nkomo',  prenom: 'Alain',   grade: 'Colonel' },
-    { login: 'cemaa',                role: RoleUtilisateur.cemaa,       base_id: 'BA101', nom: 'CEMAA',  prenom: 'Général', grade: 'Général de Corps d\'Armée Aérienne' },
-    { login: 'chef.escale.douala',   role: RoleUtilisateur.chef_escale, base_id: 'BA102', nom: 'Bello',  prenom: 'Hassan',  grade: 'Adjudant-Chef' },
+    { login: 'admin.sigea',         role: RoleUtilisateur.admin,       base_id: 'BA101', nom: 'Admin',  prenom: 'Système', grade: 'Colonel' },
+    { login: 'chef.escale.yaounde', role: RoleUtilisateur.chef_escale, base_id: 'BA101', nom: 'Mbarga', prenom: 'Jean',    grade: 'Adjudant' },
+    { login: 'comeso.yaounde',      role: RoleUtilisateur.comeso,      base_id: 'BA101', nom: 'Fouda',  prenom: 'Paul',    grade: 'Lieutenant' },
+    { login: 'comgmo.yaounde',      role: RoleUtilisateur.comgmo,      base_id: 'BA101', nom: 'Ateba',  prenom: 'Marie',   grade: 'Capitaine' },
+    { login: 'combase.yaounde',     role: RoleUtilisateur.combase,     base_id: 'BA101', nom: 'Nkomo',  prenom: 'Alain',   grade: 'Colonel' },
+    { login: 'cemaa',               role: RoleUtilisateur.cemaa,       base_id: 'BA101', nom: 'CEMAA',  prenom: 'Général', grade: 'Général de Corps d\'Armée Aérienne' },
+    { login: 'chef.escale.douala',  role: RoleUtilisateur.chef_escale, base_id: 'BA101', nom: 'Bello',  prenom: 'Hassan',  grade: 'Adjudant-Chef' },
   ];
 
   for (const u of users) {
@@ -84,7 +87,7 @@ async function main(): Promise<void> {
     });
   }
 
-  console.log('✅ Seed terminé — bases à id déterministe, admin.sigea créé');
+  console.log('✅ Seed terminé — ID de base normalisés (MAJUSCULES), mapping unique.');
 }
 
 main().catch(console.error).finally(() => prisma.$disconnect());

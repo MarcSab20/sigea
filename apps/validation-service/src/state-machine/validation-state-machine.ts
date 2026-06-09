@@ -13,15 +13,18 @@ const ROLE_TO_ETAPE: Partial<Record<RoleUtilisateur, EtapeValidation>> = {
 const ETAPE_SEQUENCE: EtapeValidation[] = [
   EtapeValidation.COMESO,
   EtapeValidation.COMGMO,
-  EtapeValidation.COMBORD,
   EtapeValidation.COMBASE,
+  EtapeValidation.COMBORD,
 ];
 
 @Injectable()
 export class ValidationStateMachine {
   private readonly logger = new Logger(ValidationStateMachine.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly events: EventPublisher,
+  ) {}
 
   async valider(
     manifeste_id: string,
@@ -35,10 +38,9 @@ export class ValidationStateMachine {
     });
     if (!manifeste) throw new BadRequestException('Manifeste introuvable');
 
-    // Bloquer COMBASE si CEMAA_SENSIBLE en attente
     if (role === RoleUtilisateur.COMBASE && manifeste.flag_sensible) {
       const sensiblePending = manifeste.validations.find(
-        v => v.etape === EtapeValidation.CEMAA_SENSIBLE && v.statut === 'EN_ATTENTE',
+        (v) => v.etape === EtapeValidation.CEMAA_SENSIBLE && v.statut === 'EN_ATTENTE',
       );
       if (sensiblePending) throw new ForbiddenException('Validation CEMAA requise avant signature COMBASE');
     }
@@ -54,11 +56,19 @@ export class ValidationStateMachine {
 
     this.logger.log(`Validation : manifeste=${manifeste_id} etape=${etape} role=${role}`);
 
-    // Si COMBASE : passer le manifeste à VALIDE
+    const ts = new Date().toISOString();
+    await this.events.publish(EVENTS.MANIFESTE_STEP_VALIDATED, {
+      manifeste_id, base_id, etape, statut: 'APPROUVE', vol_id: manifeste.vol_id, timestamp: ts,
+    });
+
     if (etape === EtapeValidation.COMBASE) {
       await this.prisma.manifeste.update({
         where: { id: manifeste_id },
         data: { statut: StatutManifeste.VALIDE },
+      });
+      await this.events.publish(EVENTS.MANIFESTE_COMPLETED, {
+        manifeste_id, base_id, vol_id: manifeste.vol_id,
+        flag_sensible: manifeste.flag_sensible, timestamp: ts,
       });
     }
 
@@ -74,7 +84,6 @@ export class ValidationStateMachine {
     const etape = ROLE_TO_ETAPE[role];
     if (!etape) throw new ForbiddenException('Rôle non autorisé à rejeter');
 
-    // Invalider toutes les étapes suivantes
     const etapeIndex = ETAPE_SEQUENCE.indexOf(etape);
     const etapesAInvalider = ETAPE_SEQUENCE.slice(etapeIndex);
 
@@ -92,6 +101,10 @@ export class ValidationStateMachine {
     await this.prisma.manifeste.update({
       where: { id: manifeste_id },
       data: { statut: StatutManifeste.REJETE },
+    });
+
+    await this.events.publish(EVENTS.MANIFESTE_STEP_REJECTED, {
+      manifeste_id, base_id, etape, statut: 'REJETE', timestamp: new Date().toISOString(),
     });
 
     return result;

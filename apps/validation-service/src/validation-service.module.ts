@@ -5,6 +5,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { SharedDatabaseModule } from '@sigea/shared-database';
 import { AuditModule } from '@sigea/shared-audit';
+import { MessagingModule } from '@sigea/shared-messaging';
 import { ValidationStateMachine } from './state-machine/validation-state-machine';
 import { ValidationController } from './validation/validation.controller';
 import { HealthModule } from './health/health.module';
@@ -22,6 +23,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     }),
     SharedDatabaseModule,
     AuditModule,
+    MessagingModule,
     HealthModule,
   ],
   providers: [ValidationStateMachine, JwtStrategy],

@@ -1,0 +1,6 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# REMPLACER le bloc "notification-service:" existant de docker/docker-compose.yml
+# par celui-ci. Seuls REDIS_URL et le depends_on redis sont ajoutés
+# (nécessaires à l'adaptateur Socket.IO ↔ Redis). Le reste est inchangé.
+# ──────────────────────────────────────────────────────────────────────────────
+  

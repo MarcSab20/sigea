@@ -79,7 +79,7 @@ services:
       NODE_ENV: development
       DATABASE_URL: postgresql://sigea_app:${DB_PASSWORD}@postgres:5432/sigea
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
-      RABBITMQ_URL: amqp://sigea:${RABBIT_PASSWORD}@rabbitmq:5672
+      RABBITMQ_URL: amqp://sigea:${RABBITMQ_PASSWORD}@rabbitmq:5672
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
       AUTH_SERVICE_URL: http://auth-service:3001
       REFERENTIEL_SERVICE_URL: http://referentiel-service:3002
@@ -147,7 +147,7 @@ services:
       PORT: 3003
       DATABASE_URL: postgresql://sigea_app:${DB_PASSWORD}@postgres:5432/sigea
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
-      RABBITMQ_URL: amqp://sigea:${RABBIT_PASSWORD}@rabbitmq:5672
+      RABBITMQ_URL: amqp://sigea:${RABBITMQ_PASSWORD}@rabbitmq:5672
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
     depends_on:
       postgres: { condition: service_healthy }
@@ -164,7 +164,7 @@ services:
       PORT: 3004
       DATABASE_URL: postgresql://sigea_app:${DB_PASSWORD}@postgres:5432/sigea
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
-      RABBITMQ_URL: amqp://sigea:${RABBIT_PASSWORD}@rabbitmq:5672
+      RABBITMQ_URL: amqp://sigea:${RABBITMQ_PASSWORD}@rabbitmq:5672
       CEMAA_ENCRYPTION_KEY: ${CEMAA_ENCRYPTION_KEY}
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
     depends_on:
@@ -182,7 +182,7 @@ services:
     environment:
       PORT: 3005
       DATABASE_URL: postgresql://sigea_app:${DB_PASSWORD}@postgres:5432/sigea
-      RABBITMQ_URL: amqp://sigea:${RABBIT_PASSWORD}@rabbitmq:5672
+      RABBITMQ_URL: amqp://sigea:${RABBITMQ_PASSWORD}@rabbitmq:5672
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
     depends_on:
       postgres: { condition: service_healthy }
@@ -200,7 +200,7 @@ services:
       PORT: 3006
       DATABASE_URL: postgresql://sigea_app:${DB_PASSWORD}@postgres:5432/sigea
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
-      RABBITMQ_URL: amqp://sigea:${RABBIT_PASSWORD}@rabbitmq:5672
+      RABBITMQ_URL: amqp://sigea:${RABBITMQ_PASSWORD}@rabbitmq:5672
       CEMAA_ENCRYPTION_KEY: ${CEMAA_ENCRYPTION_KEY}
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
     depends_on:
@@ -216,10 +216,13 @@ services:
     ports: ["3007:3007"]
     environment:
       PORT: 3007
-      RABBITMQ_URL: amqp://sigea:${RABBIT_PASSWORD}@rabbitmq:5672
+      RABBITMQ_URL: amqp://sigea:${RABBITMQ_PASSWORD}@rabbitmq:5672
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
     depends_on:
       rabbitmq: { condition: service_healthy }
+      redis:    { condition: service_healthy }
 
   pdf-service:
     build:
@@ -232,7 +235,7 @@ services:
     environment:
       PORT: 3008
       DATABASE_URL: postgresql://sigea_app:${DB_PASSWORD}@postgres:5432/sigea
-      RABBITMQ_URL: amqp://sigea:${RABBIT_PASSWORD}@rabbitmq:5672
+      RABBITMQ_URL: amqp://sigea:${RABBITMQ_PASSWORD}@rabbitmq:5672
       CEMAA_ENCRYPTION_KEY: ${CEMAA_ENCRYPTION_KEY}
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
     depends_on:

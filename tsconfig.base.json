@@ -18,12 +18,13 @@
     "ignoreDeprecations": "5.0",
     "baseUrl": ".",
     "paths": {
-      "@sigea/shared-types":    ["libs/shared-types/src/index.ts"],
-      "@sigea/shared-auth":     ["libs/shared-auth/src/index.ts"],
-      "@sigea/shared-database": ["libs/shared-database/src/index.ts"],
-      "@sigea/shared-events":   ["libs/shared-events/src/index.ts"],
-      "@sigea/shared-audit":    ["libs/shared-audit/src/index.ts"],
-      "@sigea/shared-crypto":   ["libs/shared-crypto/src/index.ts"]
+      "@sigea/shared-types":     ["libs/shared-types/src/index.ts"],
+      "@sigea/shared-auth":      ["libs/shared-auth/src/index.ts"],
+      "@sigea/shared-database":  ["libs/shared-database/src/index.ts"],
+      "@sigea/shared-events":    ["libs/shared-events/src/index.ts"],
+      "@sigea/shared-audit":     ["libs/shared-audit/src/index.ts"],
+      "@sigea/shared-crypto":    ["libs/shared-crypto/src/index.ts"],
+      "@sigea/shared-messaging": ["libs/shared-messaging/src/index.ts"]
     }
   },
   "exclude": ["node_modules", "tmp"]
