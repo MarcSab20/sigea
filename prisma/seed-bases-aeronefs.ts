@@ -7,12 +7,12 @@ const prisma = new PrismaClient();
 
 const BASES = [
   { code_base: 'BA101', nom: 'Base Aérienne 101 Yaoundé',    region: 'Centre' },
-  { code_base: 'BA102', nom: 'Base Aérienne 102 Douala',     region: 'Littoral' },
-  { code_base: 'BA201', nom: 'Base Aérienne 201 Garoua',     region: 'Nord' },
-  { code_base: 'BA301', nom: 'Base Aérienne 301 Maroua',     region: 'Extrême-Nord' },
+  { code_base: 'BA102', nom: 'Base Aérienne 102 Bertoua',     region: 'Est' },
+  { code_base: 'BA201', nom: 'Base Aérienne 201 Douala',     region: 'Littoral' },
+  { code_base: 'BA301', nom: 'Base Aérienne 301 Garoua',     region: 'Nord' },
   { code_base: 'BA302', nom: 'Base Aérienne 302 Ngaoundéré', region: 'Adamaoua' },
-  { code_base: 'BA401', nom: 'Base Aérienne 401 Bafoussam',  region: 'Ouest' },
-  { code_base: 'BA501', nom: 'Base Aérienne 501 Bertoua',    region: 'Est' },
+  { code_base: 'BA401', nom: 'Base Aérienne 401 Maroua',  region: 'Extrême-Nord' },
+  { code_base: 'BA501', nom: 'Base Aérienne 501 Bamenda',    region: 'Nord-Ouest' },
 ];
 
 const AERONEFS = [

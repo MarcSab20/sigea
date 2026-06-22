@@ -1,4 +1,3 @@
-// apps/frontend/src/app/dashboard/DashboardPage.tsx
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/stores/auth.store';
