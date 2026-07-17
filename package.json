@@ -19,6 +19,9 @@
     "docker:down": "docker compose -f docker/docker-compose.yml down",
     "docker:logs": "docker compose -f docker/docker-compose.yml logs -f"
   },
+  "prisma": {
+  "seed": "ts-node --project tsconfig.base.json prisma/seed.ts"
+  },
   "devDependencies": {
     "@nx/eslint": "18.x",
     "@nx/jest": "18.x",

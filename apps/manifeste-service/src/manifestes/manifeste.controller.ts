@@ -41,6 +41,6 @@ export class ManifesteController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: JwtPayload,
   ): Promise<unknown> {
-    return this.manifesteService.soumettre(id, user.base_id);
+    return this.manifesteService.soumettre(id, user);
   }
 }

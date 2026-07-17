@@ -1,33 +1,44 @@
 // apps/vol-service/src/vols/dto/create-vol.dto.ts
-import { IsString, IsUUID, IsDateString, IsEnum, IsInt, IsOptional,
-  IsArray, IsNumber, ValidateNested, MinLength } from 'class-validator';
+import {
+  IsString, IsDateString, IsEnum, IsInt, IsOptional, IsArray,
+  IsNumber, ValidateNested, MinLength, Min, ArrayMaxSize, Matches,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { TypeMission } from '@sigea/shared-types';
 
 export class EscaleCapaciteDto {
+  // NB : les identifiants de base sont des codes métier ("BA101"), pas des
+  // UUID — le seed les impose comme clé primaire. Pas de @IsUUID() ici.
   @IsString() base_id!: string;
-  @IsInt() capacite_places!: number;
-  @IsNumber() capacite_cargo_kg!: number;
+  @IsInt() @Min(0) capacite_places!: number;
+  @IsNumber() @Min(0) capacite_cargo_kg!: number;
 }
 
 export class CreateVolDto {
-  @IsString() numero_mission!: string;
+  @IsString()
+  @Matches(/^[A-Z0-9-]{3,20}$/, {
+    message: 'numero_mission : majuscules, chiffres et tirets uniquement (3 à 20 caractères)',
+  })
+  numero_mission!: string;
+
   @IsString() immatriculation!: string;
   @IsDateString() date_heure!: string;
   @IsString() base_depart_id!: string;
   @IsString() base_arrivee_id!: string;
   @IsEnum(TypeMission) type_mission!: TypeMission;
-  @IsInt() capacite_places!: number;
-  @IsNumber() capacite_cargo_kg!: number;
+  @IsInt() @Min(0) capacite_places!: number;
+  @IsNumber() @Min(0) capacite_cargo_kg!: number;
 
-  // Commandant de bord
+  // ── Commandant de bord : figé sur le vol, alimente le tampon COMBORD ──
   @IsString() @MinLength(2) combord_grade!: string;
   @IsString() @MinLength(2) combord_nom!: string;
   @IsString() @MinLength(2) combord_prenom!: string;
 
-  // Escales intermédiaires avec capacités propres
+  // ── Escales intermédiaires, dans l'ordre de la route ──
+  // L'ordre du tableau fait foi : il est matérialisé en EscaleVol.ordre.
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(10)
   @ValidateNested({ each: true })
   @Type(() => EscaleCapaciteDto)
   escales?: EscaleCapaciteDto[];

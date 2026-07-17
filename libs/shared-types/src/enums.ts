@@ -17,11 +17,25 @@ export enum StatutManifeste {
 }
 
 export enum EtapeValidation {
+  CHEF_ESCALE    = 'CHEF_ESCALE',
   COMESO         = 'COMESO',
   COMGMO         = 'COMGMO',
   COMBORD        = 'COMBORD',
   CEMAA_SENSIBLE = 'CEMAA_SENSIBLE',
   COMBASE        = 'COMBASE',
+}
+
+/// Mention portée par le tampon circulaire apposé sur le manifeste.
+export enum MentionSignature {
+  VU     = 'VU',
+  ACCORD = 'ACCORD',
+}
+
+export enum StatutVol {
+  PLANIFIE = 'PLANIFIE',
+  EN_COURS = 'EN_COURS',
+  CLOTURE  = 'CLOTURE',
+  ANNULE   = 'ANNULE',
 }
 
 export enum StatutValidation {

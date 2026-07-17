@@ -1,5 +1,5 @@
 // apps/vol-service/src/vols/vols.controller.ts
-import { Controller, Get, Post, Body, Param, UseGuards, ParseUUIDPipe } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Param, UseGuards, ParseUUIDPipe } from '@nestjs/common';
 import { JwtAuthGuard, RolesGuard, Roles, CurrentUser } from '@sigea/shared-auth';
 import { RoleUtilisateur, JwtPayload } from '@sigea/shared-types';
 import { VolsService } from './vols.service';
@@ -25,5 +25,17 @@ export class VolsController {
   @Get(':id')
   findOne(@Param('id', ParseUUIDPipe) id: string): Promise<unknown> {
     return this.volsService.findOne(id);
+  }
+
+  /**
+   * Annulation — et non suppression : un vol portant des manifestes doit
+   * rester consultable (FK Manifeste.vol_id en RESTRICT). Aucune route
+   * DELETE n'est donc exposée, volontairement.
+   */
+  @Patch(':id/annuler')
+  @Roles(RoleUtilisateur.ADMIN, RoleUtilisateur.COMBASE)
+  @UseGuards(RolesGuard)
+  annuler(@Param('id', ParseUUIDPipe) id: string): Promise<unknown> {
+    return this.volsService.annuler(id);
   }
 }

@@ -13,8 +13,16 @@ export class PassagersService {
       where: { id: manifesteId, base_id },
     });
     if (!manifeste) throw new NotFoundException('Manifeste introuvable');
-    if (manifeste.statut !== StatutManifeste.BROUILLON) {
-      throw new BadRequestException('Impossible de modifier un manifeste soumis');
+    // BROUILLON et REJETE sont les deux états éditables : un manifeste rejeté
+    // doit pouvoir être corrigé puis resoumis. N'accepter que BROUILLON
+    // rendait le cycle de rejet inexploitable.
+    if (
+      manifeste.statut !== StatutManifeste.BROUILLON &&
+      manifeste.statut !== StatutManifeste.REJETE
+    ) {
+      throw new BadRequestException(
+        `Manifeste ${manifeste.statut} : modification impossible pendant le circuit de validation`,
+      );
     }
     return this.prisma.passager.create({
       data: {

@@ -29,7 +29,7 @@ async function main(): Promise<void> {
   for (const b of BASES) {
     await prisma.base.upsert({
       where: { code_base: b.code_base },
-      update: { nom: b.nom, region: b.region },
+      update: { nom: b.nom, region: b.region, numero: b.numero },
       create: b,
     });
     console.log(`  ✓ Base ${b.code_base}`);

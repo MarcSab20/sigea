@@ -31,7 +31,11 @@ enum StatutManifeste {
   REJETE
 }
 
+/// Étapes du circuit. L'ordre métier est porté par ETAPE_SEQUENCE
+/// (validation-service), PAS par l'ordre de déclaration de cet enum.
+/// CEMAA_SENSIBLE est hors séquence : c'est un verrou conditionnel.
 enum EtapeValidation {
+  CHEF_ESCALE
   COMESO
   COMGMO
   COMBORD
@@ -43,6 +47,20 @@ enum StatutValidation {
   EN_ATTENTE
   APPROUVE
   REJETE
+}
+
+/// Mention portée par le tampon circulaire.
+/// VU pour CHEF_ESCALE/COMESO/COMGMO/COMBORD, ACCORD pour COMBASE.
+enum MentionSignature {
+  VU
+  ACCORD
+}
+
+enum StatutVol {
+  PLANIFIE
+  EN_COURS
+  CLOTURE
+  ANNULE
 }
 
 enum CategoriePassager {
@@ -97,6 +115,10 @@ enum FonctionEquipage {
 model Base {
   id             String        @id @default(uuid())
   code_base      String        @unique
+  /// Numéro seul de la base, ex. "101" pour BA101.
+  /// Sert à composer les tampons : "COMGMO 102", "COMESCALE 201".
+  /// Champ explicite plutôt que dérivé de code_base par slicing.
+  numero         String
   nom            String
   region         String
   admin_id       String?
@@ -105,6 +127,7 @@ model Base {
   manifestes     Manifeste[]
   vols_depart    Vol[]         @relation("VolDepart")
   vols_arrivee   Vol[]         @relation("VolArrivee")
+  escales        EscaleVol[]   @relation("VolEscale")
   createdAt      DateTime      @default(now())
 }
 
@@ -208,17 +231,47 @@ model Vol {
   flag_sensible     Boolean       @default(false)
   capacite_places   Int
   capacite_cargo_kg Decimal       @db.Decimal(10, 2)
-  statut            String        @default("PLANIFIE")
+
+  /// Commandant de bord — figé sur le vol.
+  /// Alimente le tampon COMBORD (nom + immatriculation) à l'impression.
+  combord_grade     String
+  combord_nom       String
+  combord_prenom    String
+
+  statut            StatutVol     @default(PLANIFIE)
+  escales           EscaleVol[]
   manifestes        Manifeste[]
   consignes_cemaa   ConsigneCemaa[]
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
+
+  @@index([date_heure])
+  @@index([statut])
+}
+
+/// Escale intermédiaire avec capacités propres.
+/// Remplace l'ancien champ `escales_json` (qui n'a jamais existé en base).
+model EscaleVol {
+  id                String   @id @default(uuid())
+  vol_id            String
+  vol               Vol      @relation(fields: [vol_id], references: [id], onDelete: Cascade)
+  base_id           String
+  base              Base     @relation("VolEscale", fields: [base_id], references: [id])
+  /// Rang de l'escale sur la route, 1..n.
+  ordre             Int
+  capacite_places   Int
+  capacite_cargo_kg Decimal  @db.Decimal(10, 2)
+  createdAt         DateTime @default(now())
+
+  @@unique([vol_id, ordre])
+  @@unique([vol_id, base_id])
+  @@index([base_id])
 }
 
 model ConsigneCemaa {
   id               String       @id @default(uuid())
   vol_id           String
-  vol              Vol          @relation(fields: [vol_id], references: [id])
+  vol              Vol          @relation(fields: [vol_id], references: [id], onDelete: Cascade)
   escale_base_id   String?
   type             TypeConsigne
   contenu_chiffre  String
@@ -226,8 +279,10 @@ model ConsigneCemaa {
   masse_bloquee_kg Decimal      @default(0) @db.Decimal(10, 2)
   valide_par_cemaa String
   date             DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
 
   @@index([vol_id])
+  @@index([vol_id, escale_base_id])
 }
 
 model Manifeste {
@@ -242,7 +297,20 @@ model Manifeste {
   etape_vol           String                  @default("A")
   version             Int                     @default(1)
   statut              StatutManifeste         @default(BROUILLON)
+  /// Prochaine étape attendue du circuit. NULL tant que BROUILLON,
+  /// et une fois le circuit terminé. Écrit exclusivement par la
+  /// state machine du validation-service.
+  etape_courante      EtapeValidation?
   flag_sensible       Boolean                 @default(false)
+
+  /// Indication portée sur le document imprimé dès qu'une consigne
+  /// CEMAA a été appliquée à ce manifeste. Dénormalisé depuis
+  /// ConsigneCemaa par le consumer d'évènement, pour éviter une
+  /// jointure à chaque rendu de liste.
+  consignes_cemaa_appliquees Boolean          @default(false)
+  consignes_cemaa_date       DateTime?
+  consignes_cemaa_nb         Int              @default(0)
+
   cree_par            String
   passagers           Passager[]
   materiels           Materiel[]
@@ -336,10 +404,13 @@ model Equipage {
   fonction     FonctionEquipage
 }
 
+/// Une ligne par étape franchie. Porte AUSSI le contenu du tampon,
+/// figé à l'instant de la signature : un COMGMO muté ne doit pas
+/// altérer rétroactivement un manifeste déjà signé.
 model ValidationEtape {
   id            String           @id @default(uuid())
   manifeste_id  String
-  manifeste     Manifeste        @relation(fields: [manifeste_id], references: [id])
+  manifeste     Manifeste        @relation(fields: [manifeste_id], references: [id], onDelete: Cascade)
   etape         EtapeValidation
   validateur_id String?
   validateur    Utilisateur?     @relation(fields: [validateur_id], references: [id])
@@ -347,8 +418,20 @@ model ValidationEtape {
   commentaire   String?
   statut        StatutValidation @default(EN_ATTENTE)
 
+  // ── Empreinte du tampon (renseignée uniquement si statut = APPROUVE) ──
+  /// VU, ou ACCORD pour le COMBASE.
+  mention          MentionSignature?
+  /// Ligne 1 sous la mention : "COMGMO 102", "COMESCALE 201",
+  /// ou le nom du COMBORD, ou le nom du COMBASE.
+  tampon_ligne1    String?
+  /// Ligne 2 optionnelle : immatriculation pour le COMBORD, code base pour le COMBASE.
+  tampon_ligne2    String?
+  signataire_nom   String?
+  signataire_grade String?
+
   @@unique([manifeste_id, etape], name: "manifeste_id_etape")
   @@index([manifeste_id, etape])
+  @@index([statut])
 }
 
 model AlerteEscale {

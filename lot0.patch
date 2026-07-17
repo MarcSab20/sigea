@@ -1,0 +1,619 @@
+diff --git a/apps/validation-service/src/state-machine/validation-state-machine.ts b/apps/validation-service/src/state-machine/validation-state-machine.ts
+index f6667b4..db8f631 100644
+--- a/apps/validation-service/src/state-machine/validation-state-machine.ts
++++ b/apps/validation-service/src/state-machine/validation-state-machine.ts
+@@ -1,21 +1,21 @@
+ import { Injectable, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
+ import { PrismaService } from '@sigea/shared-database';
+-import { EtapeValidation, RoleUtilisateur, StatutManifeste } from '@sigea/shared-types';
+-
+-const ROLE_TO_ETAPE: Partial<Record<RoleUtilisateur, EtapeValidation>> = {
+-  [RoleUtilisateur.COMESO]:  EtapeValidation.COMESO,
+-  [RoleUtilisateur.COMGMO]:  EtapeValidation.COMGMO,
+-  [RoleUtilisateur.COMBORD]: EtapeValidation.COMBORD,
+-  [RoleUtilisateur.CEMAA]:   EtapeValidation.CEMAA_SENSIBLE,
+-  [RoleUtilisateur.COMBASE]: EtapeValidation.COMBASE,
+-};
+-
+-const ETAPE_SEQUENCE: EtapeValidation[] = [
+-  EtapeValidation.COMESO,
+-  EtapeValidation.COMGMO,
+-  EtapeValidation.COMBASE,
+-  EtapeValidation.COMBORD,
+-];
++import {
++  EtapeValidation,
++  RoleUtilisateur,
++  StatutManifeste,
++  ROLE_TO_ETAPE,
++  ETAPE_SEQUENCE,
++} from '@sigea/shared-types';
++// Ces deux imports manquaient : le fichier ne compilait pas.
++import { EVENTS } from '@sigea/shared-events';
++import { EventPublisher } from '@sigea/shared-messaging';
++
++// NOTE Lot 0 — ROLE_TO_ETAPE et ETAPE_SEQUENCE étaient redéfinis localement ici,
++// avec un ordre (COMESO→COMGMO→COMBASE→COMBORD) contredisant le circuit réel.
++// Ils proviennent désormais de @sigea/shared-types (source de vérité unique).
++// Le Lot 1 réécrit entièrement cette classe : séquencement strict, étape
++// CHEF_ESCALE, apposition des tampons, etape_courante.
+ 
+ @Injectable()
+ export class ValidationStateMachine {
+diff --git a/apps/vol-service/src/vols/dto/create-vol.dto.ts b/apps/vol-service/src/vols/dto/create-vol.dto.ts
+index 83c4283..a896a36 100644
+--- a/apps/vol-service/src/vols/dto/create-vol.dto.ts
++++ b/apps/vol-service/src/vols/dto/create-vol.dto.ts
+@@ -1,34 +1,45 @@
+ // apps/vol-service/src/vols/dto/create-vol.dto.ts
+-import { IsString, IsUUID, IsDateString, IsEnum, IsInt, IsOptional,
+-  IsArray, IsNumber, ValidateNested, MinLength } from 'class-validator';
++import {
++  IsString, IsDateString, IsEnum, IsInt, IsOptional, IsArray,
++  IsNumber, ValidateNested, MinLength, Min, ArrayMaxSize, Matches,
++} from 'class-validator';
+ import { Type } from 'class-transformer';
+ import { TypeMission } from '@sigea/shared-types';
+ 
+ export class EscaleCapaciteDto {
++  // NB : les identifiants de base sont des codes métier ("BA101"), pas des
++  // UUID — le seed les impose comme clé primaire. Pas de @IsUUID() ici.
+   @IsString() base_id!: string;
+-  @IsInt() capacite_places!: number;
+-  @IsNumber() capacite_cargo_kg!: number;
++  @IsInt() @Min(0) capacite_places!: number;
++  @IsNumber() @Min(0) capacite_cargo_kg!: number;
+ }
+ 
+ export class CreateVolDto {
+-  @IsString() numero_mission!: string;
++  @IsString()
++  @Matches(/^[A-Z0-9-]{3,20}$/, {
++    message: 'numero_mission : majuscules, chiffres et tirets uniquement (3 à 20 caractères)',
++  })
++  numero_mission!: string;
++
+   @IsString() immatriculation!: string;
+   @IsDateString() date_heure!: string;
+   @IsString() base_depart_id!: string;
+   @IsString() base_arrivee_id!: string;
+   @IsEnum(TypeMission) type_mission!: TypeMission;
+-  @IsInt() capacite_places!: number;
+-  @IsNumber() capacite_cargo_kg!: number;
++  @IsInt() @Min(0) capacite_places!: number;
++  @IsNumber() @Min(0) capacite_cargo_kg!: number;
+ 
+-  // Commandant de bord
++  // ── Commandant de bord : figé sur le vol, alimente le tampon COMBORD ──
+   @IsString() @MinLength(2) combord_grade!: string;
+   @IsString() @MinLength(2) combord_nom!: string;
+   @IsString() @MinLength(2) combord_prenom!: string;
+ 
+-  // Escales intermédiaires avec capacités propres
++  // ── Escales intermédiaires, dans l'ordre de la route ──
++  // L'ordre du tableau fait foi : il est matérialisé en EscaleVol.ordre.
+   @IsOptional()
+   @IsArray()
++  @ArrayMaxSize(10)
+   @ValidateNested({ each: true })
+   @Type(() => EscaleCapaciteDto)
+   escales?: EscaleCapaciteDto[];
+-}
+\ No newline at end of file
++}
+diff --git a/apps/vol-service/src/vols/vols.controller.ts b/apps/vol-service/src/vols/vols.controller.ts
+index 21ce405..09f4571 100644
+--- a/apps/vol-service/src/vols/vols.controller.ts
++++ b/apps/vol-service/src/vols/vols.controller.ts
+@@ -1,5 +1,5 @@
+ // apps/vol-service/src/vols/vols.controller.ts
+-import { Controller, Get, Post, Body, Param, UseGuards, ParseUUIDPipe } from '@nestjs/common';
++import { Controller, Get, Post, Patch, Body, Param, UseGuards, ParseUUIDPipe } from '@nestjs/common';
+ import { JwtAuthGuard, RolesGuard, Roles, CurrentUser } from '@sigea/shared-auth';
+ import { RoleUtilisateur, JwtPayload } from '@sigea/shared-types';
+ import { VolsService } from './vols.service';
+@@ -26,4 +26,16 @@ export class VolsController {
+   findOne(@Param('id', ParseUUIDPipe) id: string): Promise<unknown> {
+     return this.volsService.findOne(id);
+   }
++
++  /**
++   * Annulation — et non suppression : un vol portant des manifestes doit
++   * rester consultable (FK Manifeste.vol_id en RESTRICT). Aucune route
++   * DELETE n'est donc exposée, volontairement.
++   */
++  @Patch(':id/annuler')
++  @Roles(RoleUtilisateur.ADMIN, RoleUtilisateur.COMBASE)
++  @UseGuards(RolesGuard)
++  annuler(@Param('id', ParseUUIDPipe) id: string): Promise<unknown> {
++    return this.volsService.annuler(id);
++  }
+ }
+\ No newline at end of file
+diff --git a/apps/vol-service/src/vols/vols.service.ts b/apps/vol-service/src/vols/vols.service.ts
+index d327ddd..0ee7398 100644
+--- a/apps/vol-service/src/vols/vols.service.ts
++++ b/apps/vol-service/src/vols/vols.service.ts
+@@ -1,6 +1,13 @@
+ // apps/vol-service/src/vols/vols.service.ts
+-import { Injectable, NotFoundException } from '@nestjs/common';
++import {
++  Injectable,
++  NotFoundException,
++  BadRequestException,
++  ConflictException,
++} from '@nestjs/common';
+ import { PrismaService } from '@sigea/shared-database';
++import { StatutVol, TypeMission } from '@sigea/shared-types';
++import { Prisma } from '@prisma/client';
+ import { CreateVolDto } from './dto/create-vol.dto';
+ 
+ @Injectable()
+@@ -8,40 +15,130 @@ export class VolsService {
+   constructor(private readonly prisma: PrismaService) {}
+ 
+   async create(dto: CreateVolDto): Promise<unknown> {
+-    return this.prisma.vol.create({
+-      data: {
+-        numero_mission:    dto.numero_mission,
+-        immatriculation:   dto.immatriculation,
+-        date_heure:        new Date(dto.date_heure),
+-        base_depart_id:    dto.base_depart_id,
+-        base_arrivee_id:   dto.base_arrivee_id,
+-        type_mission:      dto.type_mission as any,
+-        capacite_places:   dto.capacite_places,
+-        capacite_cargo_kg: dto.capacite_cargo_kg,
+-        statut:            'PLANIFIE',
+-        // Commandant de bord stocké dans metadata JSON
+-        combord_grade:     dto.combord_grade,
+-        combord_nom:       dto.combord_nom,
+-        combord_prenom:    dto.combord_prenom,
+-        // Escales intermédiaires en JSON
+-        escales_json: dto.escales ? JSON.stringify(dto.escales) : null,
+-      } as any,
++    // ── Contrôles référentiels avant écriture ──
++    const aeronef = await this.prisma.aeronef.findUnique({
++      where: { immatriculation: dto.immatriculation },
+     });
++    if (!aeronef) {
++      throw new BadRequestException(`Aéronef ${dto.immatriculation} inconnu au référentiel`);
++    }
++    if (!aeronef.actif) {
++      throw new BadRequestException(`Aéronef ${dto.immatriculation} inactif`);
++    }
++    if (dto.base_depart_id === dto.base_arrivee_id) {
++      throw new BadRequestException("Base de départ et base d'arrivée identiques");
++    }
++
++    // Les capacités déclarées ne peuvent excéder l'aéronef réellement affecté.
++    if (dto.capacite_places > aeronef.capacite_places) {
++      throw new BadRequestException(
++        `Capacité déclarée (${dto.capacite_places} places) supérieure à celle du ${aeronef.type} (${aeronef.capacite_places})`,
++      );
++    }
++    if (dto.capacite_cargo_kg > Number(aeronef.capacite_cargo_kg)) {
++      throw new BadRequestException(
++        `Masse déclarée (${dto.capacite_cargo_kg} kg) supérieure à celle du ${aeronef.type} (${aeronef.capacite_cargo_kg} kg)`,
++      );
++    }
++
++    const escales = dto.escales ?? [];
++    const basesRoute = [dto.base_depart_id, dto.base_arrivee_id, ...escales.map((e) => e.base_id)];
++
++    // Toutes les bases de la route doivent exister — sinon la FK échouerait
++    // avec un message Prisma illisible pour l'utilisateur.
++    const basesConnues = await this.prisma.base.findMany({
++      where: { id: { in: [...new Set(basesRoute)] } },
++      select: { id: true },
++    });
++    const idsConnus = new Set(basesConnues.map((b) => b.id));
++    const inconnues = [...new Set(basesRoute)].filter((id) => !idsConnus.has(id));
++    if (inconnues.length) {
++      throw new BadRequestException(`Base(s) inconnue(s) : ${inconnues.join(', ')}`);
++    }
++
++    // Une escale ne peut être ni le départ ni l'arrivée, ni faire doublon.
++    // La contrainte @@unique([vol_id, base_id]) le refuserait de toute façon :
++    // autant renvoyer un message clair plutôt qu'une erreur de contrainte.
++    for (const e of escales) {
++      if (e.base_id === dto.base_depart_id || e.base_id === dto.base_arrivee_id) {
++        throw new BadRequestException(`L'escale ${e.base_id} est déjà le départ ou l'arrivée du vol`);
++      }
++      if (e.capacite_places > aeronef.capacite_places) {
++        throw new BadRequestException(`Escale ${e.base_id} : capacité places supérieure à celle de l'aéronef`);
++      }
++      if (e.capacite_cargo_kg > Number(aeronef.capacite_cargo_kg)) {
++        throw new BadRequestException(`Escale ${e.base_id} : masse supérieure à celle de l'aéronef`);
++      }
++    }
++    if (new Set(escales.map((e) => e.base_id)).size !== escales.length) {
++      throw new BadRequestException('Deux escales portent la même base');
++    }
++
++    try {
++      // Vol + escales en une seule écriture atomique : pas de vol orphelin
++      // privé de ses escales si l'insertion échoue à mi-parcours.
++      return await this.prisma.vol.create({
++        data: {
++          numero_mission:    dto.numero_mission,
++          immatriculation:   dto.immatriculation,
++          date_heure:        new Date(dto.date_heure),
++          base_depart_id:    dto.base_depart_id,
++          base_arrivee_id:   dto.base_arrivee_id,
++          type_mission:      dto.type_mission,
++          flag_sensible:     dto.type_mission === TypeMission.OP_SENSIBLE,
++          capacite_places:   dto.capacite_places,
++          capacite_cargo_kg: dto.capacite_cargo_kg,
++          combord_grade:     dto.combord_grade,
++          combord_nom:       dto.combord_nom,
++          combord_prenom:    dto.combord_prenom,
++          statut:            StatutVol.PLANIFIE,
++          escales: {
++            create: escales.map((e, i) => ({
++              base_id:           e.base_id,
++              ordre:             i + 1,
++              capacite_places:   e.capacite_places,
++              capacite_cargo_kg: e.capacite_cargo_kg,
++            })),
++          },
++        },
++        include: {
++          escales:      { include: { base: { select: { code_base: true, nom: true } } }, orderBy: { ordre: 'asc' } },
++          base_depart:  { select: { code_base: true, nom: true } },
++          base_arrivee: { select: { code_base: true, nom: true } },
++          aeronef:      { select: { immatriculation: true, type: true } },
++        },
++      });
++    } catch (e) {
++      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
++        throw new ConflictException(`Le numéro de mission ${dto.numero_mission} existe déjà`);
++      }
++      throw e;
++    }
+   }
+ 
++  /**
++   * Vols visibles depuis une base : départ, arrivée, OU escale intermédiaire.
++   * L'ancienne version ignorait les escales — un chef d'escale intermédiaire
++   * ne voyait donc pas les vols qu'il devait pourtant traiter.
++   */
+   async findAll(base_id: string): Promise<unknown[]> {
+     return this.prisma.vol.findMany({
+       where: {
+         OR: [
+           { base_depart_id: base_id },
+           { base_arrivee_id: base_id },
++          { escales: { some: { base_id } } },
+         ],
+-        statut: { not: 'ANNULE' },
++        statut: { not: StatutVol.ANNULE },
+       },
+       include: {
+         base_depart:  { select: { code_base: true, nom: true } },
+         base_arrivee: { select: { code_base: true, nom: true } },
+         aeronef:      { select: { immatriculation: true, type: true } },
++        escales: {
++          select: { ordre: true, base: { select: { code_base: true, nom: true } } },
++          orderBy: { ordre: 'asc' },
++        },
+       },
+       orderBy: { date_heure: 'asc' },
+     });
+@@ -54,10 +151,31 @@ export class VolsService {
+         base_depart:  true,
+         base_arrivee: true,
+         aeronef:      true,
+-        manifestes:   { select: { id: true, statut: true, base_id: true } },
++        escales:      { include: { base: true }, orderBy: { ordre: 'asc' } },
++        manifestes:   { select: { id: true, statut: true, base_id: true, etape_courante: true } },
+       },
+     });
+     if (!vol) throw new NotFoundException(`Vol ${id} introuvable`);
+     return vol;
+   }
+-}
+\ No newline at end of file
++
++  /**
++   * Un vol porteur de manifestes ne se supprime pas : il s'annule.
++   * La FK Manifeste.vol_id est en RESTRICT, ce qui protège la traçabilité
++   * d'un document signé. L'annulation est donc la seule sortie.
++   */
++  async annuler(id: string): Promise<unknown> {
++    const vol = await this.prisma.vol.findUnique({ where: { id } });
++    if (!vol) throw new NotFoundException(`Vol ${id} introuvable`);
++    if (vol.statut === StatutVol.ANNULE) {
++      throw new BadRequestException('Vol déjà annulé');
++    }
++    if (vol.statut === StatutVol.CLOTURE) {
++      throw new BadRequestException('Un vol clôturé ne peut plus être annulé');
++    }
++    return this.prisma.vol.update({
++      where: { id },
++      data: { statut: StatutVol.ANNULE },
++    });
++  }
++}
+diff --git a/libs/shared-types/src/enums.ts b/libs/shared-types/src/enums.ts
+index 6691d8c..81ffee5 100644
+--- a/libs/shared-types/src/enums.ts
++++ b/libs/shared-types/src/enums.ts
+@@ -17,6 +17,7 @@ export enum StatutManifeste {
+ }
+ 
+ export enum EtapeValidation {
++  CHEF_ESCALE    = 'CHEF_ESCALE',
+   COMESO         = 'COMESO',
+   COMGMO         = 'COMGMO',
+   COMBORD        = 'COMBORD',
+@@ -24,6 +25,19 @@ export enum EtapeValidation {
+   COMBASE        = 'COMBASE',
+ }
+ 
++/// Mention portée par le tampon circulaire apposé sur le manifeste.
++export enum MentionSignature {
++  VU     = 'VU',
++  ACCORD = 'ACCORD',
++}
++
++export enum StatutVol {
++  PLANIFIE = 'PLANIFIE',
++  EN_COURS = 'EN_COURS',
++  CLOTURE  = 'CLOTURE',
++  ANNULE   = 'ANNULE',
++}
++
+ export enum StatutValidation {
+   EN_ATTENTE = 'EN_ATTENTE',
+   APPROUVE   = 'APPROUVE',
+diff --git a/libs/shared-types/src/index.ts b/libs/shared-types/src/index.ts
+index 87088ee..9d62716 100644
+--- a/libs/shared-types/src/index.ts
++++ b/libs/shared-types/src/index.ts
+@@ -1,3 +1,4 @@
+ export * from './enums';
++export * from './circuit';
+ export * from './interfaces';
+ export * from './dto';
+diff --git a/prisma/schema.prisma b/prisma/schema.prisma
+index 7cd92b1..ceb4699 100644
+--- a/prisma/schema.prisma
++++ b/prisma/schema.prisma
+@@ -31,7 +31,11 @@ enum StatutManifeste {
+   REJETE
+ }
+ 
++/// Étapes du circuit. L'ordre métier est porté par ETAPE_SEQUENCE
++/// (validation-service), PAS par l'ordre de déclaration de cet enum.
++/// CEMAA_SENSIBLE est hors séquence : c'est un verrou conditionnel.
+ enum EtapeValidation {
++  CHEF_ESCALE
+   COMESO
+   COMGMO
+   COMBORD
+@@ -45,6 +49,20 @@ enum StatutValidation {
+   REJETE
+ }
+ 
++/// Mention portée par le tampon circulaire.
++/// VU pour CHEF_ESCALE/COMESO/COMGMO/COMBORD, ACCORD pour COMBASE.
++enum MentionSignature {
++  VU
++  ACCORD
++}
++
++enum StatutVol {
++  PLANIFIE
++  EN_COURS
++  CLOTURE
++  ANNULE
++}
++
+ enum CategoriePassager {
+   TROUPES
+   TROUPES_PARA
+@@ -97,6 +115,10 @@ enum FonctionEquipage {
+ model Base {
+   id             String        @id @default(uuid())
+   code_base      String        @unique
++  /// Numéro seul de la base, ex. "101" pour BA101.
++  /// Sert à composer les tampons : "COMGMO 102", "COMESCALE 201".
++  /// Champ explicite plutôt que dérivé de code_base par slicing.
++  numero         String
+   nom            String
+   region         String
+   admin_id       String?
+@@ -105,6 +127,7 @@ model Base {
+   manifestes     Manifeste[]
+   vols_depart    Vol[]         @relation("VolDepart")
+   vols_arrivee   Vol[]         @relation("VolArrivee")
++  escales        EscaleVol[]   @relation("VolEscale")
+   createdAt      DateTime      @default(now())
+ }
+ 
+@@ -208,17 +231,47 @@ model Vol {
+   flag_sensible     Boolean       @default(false)
+   capacite_places   Int
+   capacite_cargo_kg Decimal       @db.Decimal(10, 2)
+-  statut            String        @default("PLANIFIE")
++
++  /// Commandant de bord — figé sur le vol.
++  /// Alimente le tampon COMBORD (nom + immatriculation) à l'impression.
++  combord_grade     String
++  combord_nom       String
++  combord_prenom    String
++
++  statut            StatutVol     @default(PLANIFIE)
++  escales           EscaleVol[]
+   manifestes        Manifeste[]
+   consignes_cemaa   ConsigneCemaa[]
+   createdAt         DateTime      @default(now())
+   updatedAt         DateTime      @updatedAt
++
++  @@index([date_heure])
++  @@index([statut])
++}
++
++/// Escale intermédiaire avec capacités propres.
++/// Remplace l'ancien champ `escales_json` (qui n'a jamais existé en base).
++model EscaleVol {
++  id                String   @id @default(uuid())
++  vol_id            String
++  vol               Vol      @relation(fields: [vol_id], references: [id], onDelete: Cascade)
++  base_id           String
++  base              Base     @relation("VolEscale", fields: [base_id], references: [id])
++  /// Rang de l'escale sur la route, 1..n.
++  ordre             Int
++  capacite_places   Int
++  capacite_cargo_kg Decimal  @db.Decimal(10, 2)
++  createdAt         DateTime @default(now())
++
++  @@unique([vol_id, ordre])
++  @@unique([vol_id, base_id])
++  @@index([base_id])
+ }
+ 
+ model ConsigneCemaa {
+   id               String       @id @default(uuid())
+   vol_id           String
+-  vol              Vol          @relation(fields: [vol_id], references: [id])
++  vol              Vol          @relation(fields: [vol_id], references: [id], onDelete: Cascade)
+   escale_base_id   String?
+   type             TypeConsigne
+   contenu_chiffre  String
+@@ -226,8 +279,10 @@ model ConsigneCemaa {
+   masse_bloquee_kg Decimal      @default(0) @db.Decimal(10, 2)
+   valide_par_cemaa String
+   date             DateTime     @default(now())
++  updatedAt        DateTime     @updatedAt
+ 
+   @@index([vol_id])
++  @@index([vol_id, escale_base_id])
+ }
+ 
+ model Manifeste {
+@@ -242,7 +297,20 @@ model Manifeste {
+   etape_vol           String                  @default("A")
+   version             Int                     @default(1)
+   statut              StatutManifeste         @default(BROUILLON)
++  /// Prochaine étape attendue du circuit. NULL tant que BROUILLON,
++  /// et une fois le circuit terminé. Écrit exclusivement par la
++  /// state machine du validation-service.
++  etape_courante      EtapeValidation?
+   flag_sensible       Boolean                 @default(false)
++
++  /// Indication portée sur le document imprimé dès qu'une consigne
++  /// CEMAA a été appliquée à ce manifeste. Dénormalisé depuis
++  /// ConsigneCemaa par le consumer d'évènement, pour éviter une
++  /// jointure à chaque rendu de liste.
++  consignes_cemaa_appliquees Boolean          @default(false)
++  consignes_cemaa_date       DateTime?
++  consignes_cemaa_nb         Int              @default(0)
++
+   cree_par            String
+   passagers           Passager[]
+   materiels           Materiel[]
+@@ -336,10 +404,13 @@ model Equipage {
+   fonction     FonctionEquipage
+ }
+ 
++/// Une ligne par étape franchie. Porte AUSSI le contenu du tampon,
++/// figé à l'instant de la signature : un COMGMO muté ne doit pas
++/// altérer rétroactivement un manifeste déjà signé.
+ model ValidationEtape {
+   id            String           @id @default(uuid())
+   manifeste_id  String
+-  manifeste     Manifeste        @relation(fields: [manifeste_id], references: [id])
++  manifeste     Manifeste        @relation(fields: [manifeste_id], references: [id], onDelete: Cascade)
+   etape         EtapeValidation
+   validateur_id String?
+   validateur    Utilisateur?     @relation(fields: [validateur_id], references: [id])
+@@ -347,8 +418,20 @@ model ValidationEtape {
+   commentaire   String?
+   statut        StatutValidation @default(EN_ATTENTE)
+ 
++  // ── Empreinte du tampon (renseignée uniquement si statut = APPROUVE) ──
++  /// VU, ou ACCORD pour le COMBASE.
++  mention          MentionSignature?
++  /// Ligne 1 sous la mention : "COMGMO 102", "COMESCALE 201",
++  /// ou le nom du COMBORD, ou le nom du COMBASE.
++  tampon_ligne1    String?
++  /// Ligne 2 optionnelle : immatriculation pour le COMBORD, code base pour le COMBASE.
++  tampon_ligne2    String?
++  signataire_nom   String?
++  signataire_grade String?
++
+   @@unique([manifeste_id, etape], name: "manifeste_id_etape")
+   @@index([manifeste_id, etape])
++  @@index([statut])
+ }
+ 
+ model AlerteEscale {
+diff --git a/prisma/seed-bases-aeronefs.ts b/prisma/seed-bases-aeronefs.ts
+index 4e3ccc6..d495788 100644
+--- a/prisma/seed-bases-aeronefs.ts
++++ b/prisma/seed-bases-aeronefs.ts
+@@ -6,13 +6,13 @@ import { PrismaClient } from '@prisma/client';
+ const prisma = new PrismaClient();
+ 
+ const BASES = [
+-  { code_base: 'BA101', nom: 'Base Aérienne 101 Yaoundé',    region: 'Centre' },
+-  { code_base: 'BA102', nom: 'Base Aérienne 102 Bertoua',     region: 'Est' },
+-  { code_base: 'BA201', nom: 'Base Aérienne 201 Douala',     region: 'Littoral' },
+-  { code_base: 'BA301', nom: 'Base Aérienne 301 Garoua',     region: 'Nord' },
+-  { code_base: 'BA302', nom: 'Base Aérienne 302 Ngaoundéré', region: 'Adamaoua' },
+-  { code_base: 'BA401', nom: 'Base Aérienne 401 Maroua',  region: 'Extrême-Nord' },
+-  { code_base: 'BA501', nom: 'Base Aérienne 501 Bamenda',    region: 'Nord-Ouest' },
++  { code_base: 'BA101', nom: 'Base Aérienne 101 Yaoundé',    region: 'Centre' , numero: '101' },
++  { code_base: 'BA102', nom: 'Base Aérienne 102 Bertoua',     region: 'Est' , numero: '102' },
++  { code_base: 'BA201', nom: 'Base Aérienne 201 Douala',     region: 'Littoral' , numero: '201' },
++  { code_base: 'BA301', nom: 'Base Aérienne 301 Garoua',     region: 'Nord' , numero: '301' },
++  { code_base: 'BA302', nom: 'Base Aérienne 302 Ngaoundéré', region: 'Adamaoua' , numero: '302' },
++  { code_base: 'BA401', nom: 'Base Aérienne 401 Maroua',  region: 'Extrême-Nord' , numero: '401' },
++  { code_base: 'BA501', nom: 'Base Aérienne 501 Bamenda',    region: 'Nord-Ouest' , numero: '501' },
+ ];
+ 
+ const AERONEFS = [
+@@ -29,7 +29,7 @@ async function main(): Promise<void> {
+   for (const b of BASES) {
+     await prisma.base.upsert({
+       where: { code_base: b.code_base },
+-      update: { nom: b.nom, region: b.region },
++      update: { nom: b.nom, region: b.region, numero: b.numero },
+       create: b,
+     });
+     console.log(`  ✓ Base ${b.code_base}`);
+diff --git a/prisma/seed.ts b/prisma/seed.ts
+index 53bf4c0..886e453 100644
+--- a/prisma/seed.ts
++++ b/prisma/seed.ts
+@@ -21,13 +21,13 @@ const prisma = new PrismaClient();
+ // Source unique : id === code_base (MAJUSCULES). Toute la chaîne (tokens, guards,
+ // front) doit utiliser cette casse. Voir note casse dans INTEGRATION.md.
+ const BASES = [
+-  { id: 'BA101', code_base: 'BA101', nom: 'Base Aérienne 101 Yaoundé',    region: 'Centre' },
+-  { id: 'BA102', code_base: 'BA102', nom: 'Base Aérienne 102 Bertoua',     region: 'Est' },
+-  { id: 'BA201', code_base: 'BA201', nom: 'Base Aérienne 201 Douala',     region: 'Littoral' },
+-  { id: 'BA301', code_base: 'BA301', nom: 'Base Aérienne 301 Garoua',     region: 'Nord' },
+-  { id: 'BA302', code_base: 'BA302', nom: 'Base Aérienne 302 Ngaoundéré', region: 'Adamaoua' },
+-  { id: 'BA401', code_base: 'BA401', nom: 'Base Aérienne 401 Maroua',  region: 'Extrême-Nord' },
+-  { id: 'BA501', code_base: 'BA501', nom: 'Base Aérienne 501 Bamenda',    region: 'Nord-Ouest' },
++  { id: 'BA101', code_base: 'BA101', nom: 'Base Aérienne 101 Yaoundé',    region: 'Centre' , numero: '101' },
++  { id: 'BA102', code_base: 'BA102', nom: 'Base Aérienne 102 Bertoua',     region: 'Est' , numero: '102' },
++  { id: 'BA201', code_base: 'BA201', nom: 'Base Aérienne 201 Douala',     region: 'Littoral' , numero: '201' },
++  { id: 'BA301', code_base: 'BA301', nom: 'Base Aérienne 301 Garoua',     region: 'Nord' , numero: '301' },
++  { id: 'BA302', code_base: 'BA302', nom: 'Base Aérienne 302 Ngaoundéré', region: 'Adamaoua' , numero: '302' },
++  { id: 'BA401', code_base: 'BA401', nom: 'Base Aérienne 401 Maroua',  region: 'Extrême-Nord' , numero: '401' },
++  { id: 'BA501', code_base: 'BA501', nom: 'Base Aérienne 501 Bamenda',    region: 'Nord-Ouest' , numero: '501' },
+ ];
+ 
+ const AERONEFS = [
+@@ -45,7 +45,7 @@ async function main(): Promise<void> {
+   for (const b of BASES) {
+     await prisma.base.upsert({
+       where: { id: b.id },
+-      update: { code_base: b.code_base, nom: b.nom, region: b.region },
++      update: { code_base: b.code_base, nom: b.nom, region: b.region, numero: b.numero },
+       create: b,
+     });
+     console.log(`  ✓ Base ${b.code_base}`);

@@ -21,13 +21,13 @@ const prisma = new PrismaClient();
 // Source unique : id === code_base (MAJUSCULES). Toute la chaîne (tokens, guards,
 // front) doit utiliser cette casse. Voir note casse dans INTEGRATION.md.
 const BASES = [
-  { id: 'BA101', code_base: 'BA101', nom: 'Base Aérienne 101 Yaoundé',    region: 'Centre' },
-  { id: 'BA102', code_base: 'BA102', nom: 'Base Aérienne 102 Bertoua',     region: 'Est' },
-  { id: 'BA201', code_base: 'BA201', nom: 'Base Aérienne 201 Douala',     region: 'Littoral' },
-  { id: 'BA301', code_base: 'BA301', nom: 'Base Aérienne 301 Garoua',     region: 'Nord' },
-  { id: 'BA302', code_base: 'BA302', nom: 'Base Aérienne 302 Ngaoundéré', region: 'Adamaoua' },
-  { id: 'BA401', code_base: 'BA401', nom: 'Base Aérienne 401 Maroua',  region: 'Extrême-Nord' },
-  { id: 'BA501', code_base: 'BA501', nom: 'Base Aérienne 501 Bamenda',    region: 'Nord-Ouest' },
+  { id: 'BA101', code_base: 'BA101', nom: 'Base Aérienne 101 Yaoundé',    region: 'Centre',       numero: '101' },
+  { id: 'BA102', code_base: 'BA102', nom: 'Base Aérienne 102 Bertoua',    region: 'Est',          numero: '102' },
+  { id: 'BA201', code_base: 'BA201', nom: 'Base Aérienne 201 Douala',     region: 'Littoral',     numero: '201' },
+  { id: 'BA301', code_base: 'BA301', nom: 'Base Aérienne 301 Garoua',     region: 'Nord',         numero: '301' },
+  { id: 'BA302', code_base: 'BA302', nom: 'Base Aérienne 302 Ngaoundéré', region: 'Adamaoua',     numero: '302' },
+  { id: 'BA401', code_base: 'BA401', nom: 'Base Aérienne 401 Maroua',     region: 'Extrême-Nord', numero: '401' },
+  { id: 'BA501', code_base: 'BA501', nom: 'Base Aérienne 501 Bamenda',    region: 'Nord-Ouest',   numero: '501' },
 ];
 
 const AERONEFS = [
@@ -45,7 +45,7 @@ async function main(): Promise<void> {
   for (const b of BASES) {
     await prisma.base.upsert({
       where: { id: b.id },
-      update: { code_base: b.code_base, nom: b.nom, region: b.region },
+      update: { code_base: b.code_base, nom: b.nom, region: b.region, numero: b.numero },
       create: b,
     });
     console.log(`  ✓ Base ${b.code_base}`);
