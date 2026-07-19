@@ -8,6 +8,7 @@ import { AuditModule } from '@sigea/shared-audit';
 import { MessagingModule } from '@sigea/shared-messaging';
 import { ValidationStateMachine } from './state-machine/validation-state-machine';
 import { ValidationController } from './validation/validation.controller';
+import { CemaaConsumer } from './events/cemaa-consumer.service';
 import { HealthModule } from './health/health.module';
 import { JwtStrategy } from './strategies/jwt.strategy';
 
@@ -26,7 +27,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     MessagingModule,
     HealthModule,
   ],
-  providers: [ValidationStateMachine, JwtStrategy],
+  providers: [ValidationStateMachine, CemaaConsumer, JwtStrategy],
   controllers: [ValidationController],
 })
 export class ValidationServiceModule {}

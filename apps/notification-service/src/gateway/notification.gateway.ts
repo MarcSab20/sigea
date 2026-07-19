@@ -6,8 +6,9 @@ import {
   WebSocketGateway, WebSocketServer, OnGatewayConnection, OnGatewayDisconnect,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Logger } from '@nestjs/common';
+import { Logger, Inject, forwardRef } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { NotificationService } from '../notifications/notification.service';
 
 const WS_ORIGINS = (process.env.CORS_ORIGINS ?? 'http://localhost:5173')
   .split(',')
@@ -19,7 +20,11 @@ export class NotificationGateway implements OnGatewayConnection, OnGatewayDiscon
   @WebSocketServer() server!: Server;
   private readonly logger = new Logger(NotificationGateway.name);
 
-  constructor(private readonly jwtService: JwtService) {}
+  constructor(
+    private readonly jwtService: JwtService,
+    @Inject(forwardRef(() => NotificationService))
+    private readonly notifications: NotificationService,
+  ) {}
 
   handleConnection(client: Socket): void {
     try {
@@ -33,6 +38,14 @@ export class NotificationGateway implements OnGatewayConnection, OnGatewayDiscon
       void client.join(`user:${payload.sub}`);
       client.data['user'] = payload;
       this.logger.log(`Client connecté : ${payload.sub} → base:${payload.base_id}`);
+
+      // Rattrapage : renvoyer les notifications non lues accumulées hors ligne.
+      void this.notifications
+        .nonLues(payload.sub, payload.base_id)
+        .then((list) => {
+          if (list.length) client.emit('notifications.backlog', list);
+        })
+        .catch((e) => this.logger.error(`Backlog échoué : ${(e as Error).message}`));
     } catch {
       client.disconnect();
     }

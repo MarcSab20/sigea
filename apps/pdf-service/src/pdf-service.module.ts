@@ -7,6 +7,8 @@ import { PassportModule } from '@nestjs/passport';
 import { SharedDatabaseModule } from '@sigea/shared-database';
 import { SharedCryptoModule } from '@sigea/shared-crypto';
 import { PdfService } from './pdf/pdf.service';
+import { PdfController } from './pdf/pdf.controller';
+import { ManifesteDataService } from './pdf/manifeste-data.service';
 import { HealthModule } from './health/health.module';
 import { JwtStrategy } from './strategies/jwt.strategy';
 
@@ -24,6 +26,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     SharedCryptoModule,
     HealthModule,
   ],
-  providers: [PdfService, JwtStrategy],
+  controllers: [PdfController],
+  providers: [PdfService, ManifesteDataService, JwtStrategy],
 })
 export class PdfServiceModule {}

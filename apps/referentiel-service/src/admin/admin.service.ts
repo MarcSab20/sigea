@@ -66,8 +66,12 @@ export class AdminService {
 
   async createBase(dto: CreateBaseDto): Promise<unknown> {
     try {
+      // numero est requis (NOT NULL) et alimente les tampons de signature.
+      // À défaut de valeur fournie, on l'extrait des chiffres de code_base
+      // ("BA101" -> "101") ; fallback sur code_base si aucun chiffre.
+      const numero = dto.numero ?? (dto.code_base.replace(/\D/g, '') || dto.code_base);
       return await this.prisma.base.create({
-        data: { code_base: dto.code_base, nom: dto.nom, region: dto.region },
+        data: { code_base: dto.code_base, numero, nom: dto.nom, region: dto.region },
       });
     } catch (e: unknown) {
       if ((e as { code?: string }).code === 'P2002') {

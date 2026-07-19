@@ -1,25 +1,48 @@
 {
-  "name": "manifeste-service",
-  "$schema": "../../node_modules/nx/schemas/project-schema.json",
-  "sourceRoot": "apps/manifeste-service/src",
-  "projectType": "application",
-  "targets": {
-    "build": {
-      "executor": "@nx/js:tsc",
-      "options": { "outputPath": "dist/apps/manifeste-service", "main": "apps/manifeste-service/src/main.ts", "tsConfig": "apps/manifeste-service/tsconfig.app.json" }
-    },
-    "serve": {
-      "executor": "@nx/js:node",
-      "options": { "buildTarget": "manifeste-service:build" }
-    },
-    "test": {
-      "executor": "@nx/jest:jest",
-      "options": { "jestConfig": "apps/manifeste-service/jest.config.ts" }
-    },
-    "lint": {
-      "executor": "@nx/eslint:lint",
-      "options": { "lintFilePatterns": ["apps/manifeste-service/**/*.ts"] }
-    }
-  },
-  "tags": ["type:app", "scope:manifeste-service"]
+    "name":  "manifeste-service",
+    "$schema":  "../../node_modules/nx/schemas/project-schema.json",
+    "sourceRoot":  "apps/manifeste-service/src",
+    "projectType":  "application",
+    "targets":  {
+                    "build":  {
+                                  "executor":  "@nx/js:tsc",
+                                  "options":  {
+                                                  "outputPath":  "dist/apps/manifeste-service",
+                                                  "main":  "apps/manifeste-service/src/main.ts",
+                                                  "tsConfig":  "apps/manifeste-service/tsconfig.app.json"
+                                              }
+                              },
+                    "serve":  {
+                                  "executor":  "@nx/js:node",
+                                  "options":  {
+                                                  "buildTarget":  "manifeste-service:build"
+                                              }
+                              },
+                    "test":  {
+                                 "executor":  "@nx/jest:jest",
+                                 "options":  {
+                                                 "jestConfig":  "apps/manifeste-service/jest.config.ts"
+                                             }
+                             },
+                    "lint":  {
+                                 "executor":  "@nx/eslint:lint",
+                                 "options":  {
+                                                 "lintFilePatterns":  [
+                                                                          "apps/manifeste-service/**/*.ts"
+                                                                      ]
+                                             }
+                             }
+                },
+    "tags":  [
+                 "type:app",
+                 "scope:manifeste-service"
+             ],
+    "implicitDependencies":  [
+                                 "shared-audit",
+                                 "shared-auth",
+                                 "shared-database",
+                                 "shared-events",
+                                 "shared-messaging",
+                                 "shared-types"
+                             ]
 }

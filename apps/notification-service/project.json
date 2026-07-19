@@ -1,25 +1,46 @@
 {
-  "name": "notification-service",
-  "$schema": "../../node_modules/nx/schemas/project-schema.json",
-  "sourceRoot": "apps/notification-service/src",
-  "projectType": "application",
-  "targets": {
-    "build": {
-      "executor": "@nx/js:tsc",
-      "options": { "outputPath": "dist/apps/notification-service", "main": "apps/notification-service/src/main.ts", "tsConfig": "apps/notification-service/tsconfig.app.json" }
-    },
-    "serve": {
-      "executor": "@nx/js:node",
-      "options": { "buildTarget": "notification-service:build" }
-    },
-    "test": {
-      "executor": "@nx/jest:jest",
-      "options": { "jestConfig": "apps/notification-service/jest.config.ts" }
-    },
-    "lint": {
-      "executor": "@nx/eslint:lint",
-      "options": { "lintFilePatterns": ["apps/notification-service/**/*.ts"] }
-    }
-  },
-  "tags": ["type:app", "scope:notification-service"]
+    "name":  "notification-service",
+    "$schema":  "../../node_modules/nx/schemas/project-schema.json",
+    "sourceRoot":  "apps/notification-service/src",
+    "projectType":  "application",
+    "targets":  {
+                    "build":  {
+                                  "executor":  "@nx/js:tsc",
+                                  "options":  {
+                                                  "outputPath":  "dist/apps/notification-service",
+                                                  "main":  "apps/notification-service/src/main.ts",
+                                                  "tsConfig":  "apps/notification-service/tsconfig.app.json"
+                                              }
+                              },
+                    "serve":  {
+                                  "executor":  "@nx/js:node",
+                                  "options":  {
+                                                  "buildTarget":  "notification-service:build"
+                                              }
+                              },
+                    "test":  {
+                                 "executor":  "@nx/jest:jest",
+                                 "options":  {
+                                                 "jestConfig":  "apps/notification-service/jest.config.ts"
+                                             }
+                             },
+                    "lint":  {
+                                 "executor":  "@nx/eslint:lint",
+                                 "options":  {
+                                                 "lintFilePatterns":  [
+                                                                          "apps/notification-service/**/*.ts"
+                                                                      ]
+                                             }
+                             }
+                },
+    "tags":  [
+                 "type:app",
+                 "scope:notification-service"
+             ],
+    "implicitDependencies":  [
+                                 "shared-database",
+                                 "shared-events",
+                                 "shared-messaging",
+                                 "shared-auth"
+                             ]
 }

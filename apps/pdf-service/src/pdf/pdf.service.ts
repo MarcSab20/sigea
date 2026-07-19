@@ -1,41 +1,72 @@
-import { Injectable, Logger } from '@nestjs/common';
+// apps/pdf-service/src/pdf/pdf.service.ts
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import * as puppeteer from 'puppeteer';
-import { CemaaCryptoService } from '@sigea/shared-crypto';
 import { NiveauConfidentialite } from '@sigea/shared-types';
-import * as fs from 'fs/promises';
-import * as path from 'path';
+import { renderManifesteHtml, ManifesteRenderData } from './manifeste-template';
 
 @Injectable()
-export class PdfService {
+export class PdfService implements OnModuleDestroy {
   private readonly logger = new Logger(PdfService.name);
 
-  constructor(private readonly crypto: CemaaCryptoService) {}
+  // Un SEUL navigateur, réutilisé et relancé au besoin. Lancer Chromium à
+  // chaque requête ajoute ~300-800 ms et sature la RAM sous charge.
+  private browser?: puppeteer.Browser;
+  private launching?: Promise<puppeteer.Browser>;
 
-  async generateManifeste(manifesteData: unknown, niveau: NiveauConfidentialite): Promise<Buffer> {
-    const html = await this.renderTemplate(manifesteData, niveau);
-    const pdfBuffer = await this.htmlToPdf(html);
-    this.logger.log(`PDF généré : niveau=${niveau}`);
-    return pdfBuffer;
+  async onModuleDestroy(): Promise<void> {
+    await this.browser?.close().catch(() => undefined);
   }
 
-  private async renderTemplate(data: unknown, niveau: NiveauConfidentialite): Promise<string> {
-    // Templates HTML dans apps/pdf-service/src/templates/
-    const watermark = this.getWatermark(niveau);
-    return `<!DOCTYPE html><html><head><meta charset="UTF-8">
-      <style>body{font-family:Arial,sans-serif;} .watermark{position:fixed;opacity:0.15;font-size:72px;transform:rotate(-45deg);top:40%;left:10%;color:red;}</style>
-      </head><body>
-      <div class="watermark">${watermark}</div>
-      <pre>${JSON.stringify(data, null, 2)}</pre>
-      </body></html>`;
+  private async getBrowser(): Promise<puppeteer.Browser> {
+    if (this.browser?.connected) return this.browser;
+    // Évite deux lancements concurrents (thundering herd au démarrage).
+    if (!this.launching) {
+      this.launching = puppeteer
+        .launch({
+          headless: true,
+          args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--disable-dev-shm-usage'],
+        })
+        .then((b) => {
+          this.browser = b;
+          this.launching = undefined;
+          return b;
+        })
+        .catch((e) => {
+          this.launching = undefined;
+          throw e;
+        });
+    }
+    return this.launching;
+  }
+
+  async generateManifeste(
+    data: ManifesteRenderData,
+    niveau: NiveauConfidentialite,
+  ): Promise<Buffer> {
+    const html = renderManifesteHtml(data, this.getWatermark(niveau));
+    const pdf = await this.htmlToPdf(html);
+    this.logger.log(`PDF manifeste ${data.id} généré (niveau=${niveau}, ${pdf.length} o)`);
+    return pdf;
   }
 
   private async htmlToPdf(html: string): Promise<Buffer> {
-    const browser = await puppeteer.launch({ args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+    const browser = await this.getBrowser();
     const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: 'networkidle0' });
-    const pdf = await page.pdf({ format: 'A4', printBackground: true });
-    await browser.close();
-    return Buffer.from(pdf);
+    try {
+      // 'load' suffit : le HTML est autonome (SVG inline, aucune ressource
+      // réseau). 'networkidle0' ferait attendre un timeout inutile.
+      await page.setContent(html, { waitUntil: 'load' });
+      const pdf = await page.pdf({
+        format: 'A4',
+        printBackground: true,
+        margin: { top: '14mm', bottom: '14mm', left: '12mm', right: '12mm' },
+      });
+      return Buffer.from(pdf);
+    } finally {
+      // La page est TOUJOURS fermée, même si pdf() échoue : sinon fuite
+      // d'onglets jusqu'à épuisement mémoire.
+      await page.close().catch(() => undefined);
+    }
   }
 
   private getWatermark(niveau: NiveauConfidentialite): string {
@@ -43,8 +74,8 @@ export class PdfService {
       [NiveauConfidentialite.NON_CLASSIFIE]: '',
       [NiveauConfidentialite.DIFFUSION_RESTREINTE]: 'DIFFUSION RESTREINTE',
       [NiveauConfidentialite.CONFIDENTIEL_DEFENSE]: 'CONFIDENTIEL DÉFENSE',
-      [NiveauConfidentialite.SENSIBLE_CEMAA]: 'SENSIBLE CEMAA — CONFIDENTIEL DÉFENSE',
+      [NiveauConfidentialite.SENSIBLE_CEMAA]: 'SENSIBLE CEMAA',
     };
-    return map[niveau];
+    return map[niveau] ?? '';
   }
 }

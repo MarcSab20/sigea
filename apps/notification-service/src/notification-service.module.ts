@@ -3,7 +3,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { HealthModule } from './health/health.module';
-import { NotificationGatewayModule } from './gateway/notification-gateway.module';
+import { NotificationModule } from './notifications/notification.module';
 import { EventsConsumerModule } from './events/events-consumer.module';
 
 @Module({
@@ -21,7 +21,7 @@ import { EventsConsumerModule } from './events/events-consumer.module';
       }),
     }),
     HealthModule,
-    NotificationGatewayModule,
+    NotificationModule,
     EventsConsumerModule,
   ],
 })

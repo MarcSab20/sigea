@@ -128,6 +128,7 @@ model Base {
   vols_depart    Vol[]         @relation("VolDepart")
   vols_arrivee   Vol[]         @relation("VolArrivee")
   escales        EscaleVol[]   @relation("VolEscale")
+  notifications  Notification[]
   createdAt      DateTime      @default(now())
 }
 
@@ -161,6 +162,7 @@ model Utilisateur {
   known_devices       KnownDevice[]
   security_notifs     SecurityNotification[]
   mfa_reset_requests  MfaResetRequest[]
+  notifications       Notification[]
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
@@ -526,4 +528,41 @@ model MfaResetRequest {
 
   @@index([statut])
   @@map("mfa_reset_requests")
+}
+/// Notification persistée, rattrapée à la reconnexion WebSocket.
+/// Diffusée à la room base:<base_id> ; un destinataire nominatif optionnel
+/// (destinataire_id) permet les alertes ciblées (ex. acteurs d'un rejet).
+model Notification {
+  id            String            @id @default(uuid())
+  /// Room de diffusion : tous les utilisateurs de cette base la reçoivent.
+  base_id       String
+  base          Base              @relation(fields: [base_id], references: [id], onDelete: Cascade)
+  /// Destinataire nominatif optionnel. NULL = toute la base.
+  destinataire_id String?
+  destinataire  Utilisateur?      @relation(fields: [destinataire_id], references: [id], onDelete: Cascade)
+
+  type          TypeNotification
+  titre         String
+  message       String
+  /// Contexte applicatif (manifeste_id, vol_id, etape…) pour le clic-vers.
+  manifeste_id  String?
+  vol_id        String?
+  etape         String?
+
+  lu            Boolean           @default(false)
+  lu_le         DateTime?
+  createdAt     DateTime          @default(now())
+
+  @@index([base_id, createdAt])
+  @@index([destinataire_id, lu])
+  @@index([manifeste_id])
+}
+
+enum TypeNotification {
+  MANIFESTE_SOUMIS
+  ETAPE_VALIDEE
+  ETAPE_REJETEE
+  MANIFESTE_COMPLETE
+  CONSIGNE_CEMAA
+  ALERTE
 }

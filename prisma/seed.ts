@@ -21,13 +21,13 @@ const prisma = new PrismaClient();
 // Source unique : id === code_base (MAJUSCULES). Toute la chaîne (tokens, guards,
 // front) doit utiliser cette casse. Voir note casse dans INTEGRATION.md.
 const BASES = [
-  { id: 'BA101', code_base: 'BA101', nom: 'Base Aérienne 101 Yaoundé',    region: 'Centre',       numero: '101' },
-  { id: 'BA102', code_base: 'BA102', nom: 'Base Aérienne 102 Bertoua',    region: 'Est',          numero: '102' },
-  { id: 'BA201', code_base: 'BA201', nom: 'Base Aérienne 201 Douala',     region: 'Littoral',     numero: '201' },
-  { id: 'BA301', code_base: 'BA301', nom: 'Base Aérienne 301 Garoua',     region: 'Nord',         numero: '301' },
-  { id: 'BA302', code_base: 'BA302', nom: 'Base Aérienne 302 Ngaoundéré', region: 'Adamaoua',     numero: '302' },
-  { id: 'BA401', code_base: 'BA401', nom: 'Base Aérienne 401 Maroua',     region: 'Extrême-Nord', numero: '401' },
-  { id: 'BA501', code_base: 'BA501', nom: 'Base Aérienne 501 Bamenda',    region: 'Nord-Ouest',   numero: '501' },
+  { id: 'BA101', code_base: 'BA101', nom: 'Base Aérienne 101 Yaoundé',    region: 'Centre' , numero: '101' },
+  { id: 'BA102', code_base: 'BA102', nom: 'Base Aérienne 102 Bertoua',     region: 'Est' , numero: '102' },
+  { id: 'BA201', code_base: 'BA201', nom: 'Base Aérienne 201 Douala',     region: 'Littoral' , numero: '201' },
+  { id: 'BA301', code_base: 'BA301', nom: 'Base Aérienne 301 Garoua',     region: 'Nord' , numero: '301' },
+  { id: 'BA302', code_base: 'BA302', nom: 'Base Aérienne 302 Ngaoundéré', region: 'Adamaoua' , numero: '302' },
+  { id: 'BA401', code_base: 'BA401', nom: 'Base Aérienne 401 Maroua',  region: 'Extrême-Nord' , numero: '401' },
+  { id: 'BA501', code_base: 'BA501', nom: 'Base Aérienne 501 Bamenda',    region: 'Nord-Ouest' , numero: '501' },
 ];
 
 const AERONEFS = [
@@ -74,6 +74,7 @@ async function main(): Promise<void> {
     { login: 'chef.escale.yaounde', role: RoleUtilisateur.chef_escale, base_id: 'BA101', nom: 'Mbarga', prenom: 'Jean',    grade: 'Adjudant' },
     { login: 'comeso.yaounde',      role: RoleUtilisateur.comeso,      base_id: 'BA101', nom: 'Fouda',  prenom: 'Paul',    grade: 'Lieutenant' },
     { login: 'comgmo.yaounde',      role: RoleUtilisateur.comgmo,      base_id: 'BA101', nom: 'Ateba',  prenom: 'Marie',   grade: 'Capitaine' },
+    { login: 'combord.yaounde',     role: RoleUtilisateur.combord,     base_id: 'BA101', nom: 'Kamga',  prenom: 'Éric',    grade: 'Commandant' },
     { login: 'combase.yaounde',     role: RoleUtilisateur.combase,     base_id: 'BA101', nom: 'Nkomo',  prenom: 'Alain',   grade: 'Colonel' },
     { login: 'cemaa',               role: RoleUtilisateur.cemaa,       base_id: 'BA101', nom: 'CEMAA',  prenom: 'Général', grade: 'Général de Corps d\'Armée Aérienne' },
     { login: 'chef.escale.douala',  role: RoleUtilisateur.chef_escale, base_id: 'BA101', nom: 'Bello',  prenom: 'Hassan',  grade: 'Adjudant-Chef' },

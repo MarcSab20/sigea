@@ -12,9 +12,10 @@ export class EventPublisher implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(EventPublisher.name);
   private readonly url = process.env.RABBITMQ_URL ?? 'amqp://sigea:sigea@localhost:5672';
 
-  // Types volontairement souples : selon la version d'amqplib (>=0.10),
-  // connect() peut renvoyer un ChannelModel ; on conserve les API communes.
-  private connection?: amqp.Connection;
+  // Depuis @types/amqplib 0.10.x, connect() renvoie un ChannelModel et NON
+  // un Connection : c'est ChannelModel qui porte createChannel() et close().
+  // Typer ce champ en Connection ne compile pas.
+  private connection?: amqp.ChannelModel;
   private channel?: amqp.Channel;
   private connecting = false;
   private closed = false;
@@ -37,18 +38,21 @@ export class EventPublisher implements OnModuleInit, OnModuleDestroy {
     if (this.connecting || this.closed) return;
     this.connecting = true;
     try {
-      this.connection = await amqp.connect(this.url);
-      this.connection.on('error', (e: Error) =>
+      const connection = await amqp.connect(this.url);
+      this.connection = connection;
+
+      connection.on('error', (e: Error) =>
         this.logger.error(`Connexion RabbitMQ en erreur : ${e.message}`),
       );
-      this.connection.on('close', () => {
+      connection.on('close', () => {
         this.channel = undefined;
         this.connection = undefined;
         if (!this.closed) this.scheduleReconnect();
       });
 
-      this.channel = await this.connection.createChannel();
-      await this.channel.assertExchange(SIGEA_EXCHANGE, 'topic', { durable: true });
+      const channel = await connection.createChannel();
+      await channel.assertExchange(SIGEA_EXCHANGE, 'topic', { durable: true });
+      this.channel = channel;
       this.logger.log(`Publisher connecté à RabbitMQ (exchange "${SIGEA_EXCHANGE}")`);
     } catch (e) {
       this.logger.warn(

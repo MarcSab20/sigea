@@ -305,11 +305,16 @@ export class ValidationStateMachine {
 
     const cemaa = parEtape.get(EtapeValidation.CEMAA_SENSIBLE);
 
+    // Les enums Prisma (StatutManifeste, EtapeValidation) sont nominalement
+    // distincts de ceux de @sigea/shared-types, même à valeurs identiques.
+    // On franchit la frontière explicitement (les valeurs sont garanties égales).
+    const etapeCourante = manifeste.etape_courante as unknown as EtapeValidation | null;
+
     return {
       manifeste_id,
-      statut:         manifeste.statut,
-      etape_courante: manifeste.etape_courante,
-      rang_courant:   manifeste.etape_courante ? rangEtape(manifeste.etape_courante) : 0,
+      statut:         manifeste.statut as unknown as StatutManifeste,
+      etape_courante: etapeCourante,
+      rang_courant:   etapeCourante ? rangEtape(etapeCourante) : 0,
       total_etapes:   ETAPE_SEQUENCE.length,
       consignes_cemaa_appliquees: manifeste.consignes_cemaa_appliquees,
       blocs,
@@ -321,6 +326,90 @@ export class ValidationStateMachine {
           }
         : null,
     };
+  }
+
+  /**
+   * Applique une consigne CEMAA à un manifeste :
+   *   1. marque `consignes_cemaa_appliquees` (→ bandeau sur le PDF) ;
+   *   2. si le manifeste est sensible ET attend l'étape CEMAA_SENSIBLE,
+   *      franchit ce verrou et débloque l'accès au COMBASE.
+   *
+   * Idempotent : rejouer le même event (redelivery RabbitMQ) ne double ni le
+   * compteur de consignes ni l'avancement du circuit.
+   *
+   * Appelée par le consumer d'évènements, jamais par une requête HTTP :
+   * seule l'autorité CEMAA, via son propre service, peut déclencher ceci.
+   */
+  async appliquerConsigneCemaa(manifeste_id: string): Promise<void> {
+    const manifeste = await this.prisma.manifeste.findUnique({
+      where: { id: manifeste_id },
+      select: {
+        id: true, statut: true, etape_courante: true, flag_sensible: true,
+        base_id: true, vol_id: true, consignes_cemaa_appliquees: true,
+      },
+    });
+    if (!manifeste) {
+      this.logger.warn(`Consigne CEMAA : manifeste ${manifeste_id} introuvable`);
+      return;
+    }
+
+    const dejaApplique = manifeste.consignes_cemaa_appliquees;
+
+    // ── 1. Marquage du flag + compteur (source du bandeau PDF) ──
+    await this.prisma.manifeste.update({
+      where: { id: manifeste_id },
+      data: {
+        consignes_cemaa_appliquees: true,
+        consignes_cemaa_date: new Date(),
+        consignes_cemaa_nb: { increment: 1 },
+      },
+    });
+
+    // ── 2. Franchissement du verrou CEMAA_SENSIBLE, si c'est le tour ──
+    // Uniquement pour un manifeste sensible effectivement EN ATTENTE de cette
+    // étape. Un manifeste ordinaire n'a pas ce verrou ; un manifeste sensible
+    // pas encore parvenu à CEMAA_SENSIBLE le franchira au moment voulu (le
+    // flag est déjà posé, l'accord sera enregistré ici quand ce sera son tour).
+    if (
+      manifeste.flag_sensible &&
+      manifeste.etape_courante === EtapeValidation.CEMAA_SENSIBLE
+    ) {
+      const cas = await this.prisma.$transaction(async (tx) => {
+        const swap = await tx.manifeste.updateMany({
+          where: { id: manifeste_id, etape_courante: EtapeValidation.CEMAA_SENSIBLE },
+          data:  { etape_courante: EtapeValidation.COMBASE },
+        });
+        if (swap.count === 0) return false; // déjà franchie par un autre message
+
+        await tx.validationEtape.upsert({
+          where:  { manifeste_id_etape: { manifeste_id, etape: EtapeValidation.CEMAA_SENSIBLE } },
+          update: { statut: StatutValidation.APPROUVE, date_heure: new Date() },
+          create: {
+            manifeste_id,
+            etape:  EtapeValidation.CEMAA_SENSIBLE,
+            statut: StatutValidation.APPROUVE,
+          },
+        });
+        return true;
+      });
+
+      if (cas) {
+        this.logger.log(`Verrou CEMAA franchi : manifeste=${manifeste_id} → COMBASE`);
+        await this.events.publish(EVENTS.MANIFESTE_STEP_VALIDATED, {
+          manifeste_id,
+          base_id: manifeste.base_id,
+          vol_id:  manifeste.vol_id,
+          etape:   EtapeValidation.CEMAA_SENSIBLE,
+          statut:  StatutValidation.APPROUVE,
+          etape_suivante: EtapeValidation.COMBASE,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+
+    if (!dejaApplique) {
+      this.logger.log(`Consignes CEMAA appliquées : manifeste=${manifeste_id}`);
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────
