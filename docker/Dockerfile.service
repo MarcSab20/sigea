@@ -3,7 +3,10 @@ ARG SERVICE
 WORKDIR /app
 
 COPY package*.json ./
-COPY tsconfig.base.json ./
+# Résolution des alias @sigea/* vers les SOURCES pour la compilation conteneur.
+# (Le workspace Nx continue de viser dist/libs/* via le vrai tsconfig.base.json ;
+#  on ne substitue le fichier QUE dans l'image.)
+COPY docker/tsconfig.docker-base.json ./tsconfig.base.json
 
 RUN npm config set fetch-retry-mintimeout 20000 \
     && npm config set fetch-retry-maxtimeout 120000 \
@@ -27,8 +30,18 @@ FROM node:20-alpine AS runner
 ARG SERVICE
 ENV SERVICE=${SERVICE}
 
+# openssl : requis par Prisma. Chromium : uniquement pour le pdf-service
+# (Puppeteer), car `npm ci --ignore-scripts` ne télécharge pas son Chrome.
 RUN apk add --no-cache openssl && \
-    addgroup -g 1001 -S nodejs && adduser -S sigea -u 1001
+    addgroup -g 1001 -S nodejs && adduser -S sigea -u 1001 && \
+    if [ "$SERVICE" = "pdf-service" ]; then \
+      apk add --no-cache chromium nss freetype harfbuzz ca-certificates ttf-freefont && \
+      { [ -e /usr/bin/chromium-browser ] || ln -sf /usr/bin/chromium /usr/bin/chromium-browser; }; \
+    fi
+
+# Puppeteer utilisera le Chromium système au lieu de tenter un téléchargement.
+ENV PUPPETEER_SKIP_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
 WORKDIR /app
 

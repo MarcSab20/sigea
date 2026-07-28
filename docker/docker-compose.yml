@@ -216,11 +216,13 @@ services:
     ports: ["3007:3007"]
     environment:
       PORT: 3007
+      DATABASE_URL: postgresql://sigea_app:${DB_PASSWORD}@postgres:5432/sigea
       RABBITMQ_URL: amqp://sigea:${RABBITMQ_PASSWORD}@rabbitmq:5672
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
     depends_on:
+      postgres: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
       redis:    { condition: service_healthy }
 

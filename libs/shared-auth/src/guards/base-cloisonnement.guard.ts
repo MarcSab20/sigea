@@ -22,7 +22,10 @@ export class BaseCloisonnementGuard implements CanActivate {
     }
 
     // Cloisonnement strict : base_id du token vs base_id de la ressource
-    const resourceBaseId = req.params['base_id'] ?? req.body['base_id'] ?? req.headers['x-base-id'];
+    // req.body / req.params / req.headers peuvent être absents (ex. GET sans
+    // corps) : chaînage optionnel obligatoire, sinon TypeError → 500 sur les GET.
+    const resourceBaseId =
+      req.params?.['base_id'] ?? req.body?.['base_id'] ?? req.headers?.['x-base-id'];
     if (resourceBaseId && resourceBaseId !== user.base_id) {
       this.logger.warn(
         `Tentative cross-base : user=${user.sub} base_user=${user.base_id} base_ressource=${resourceBaseId} ip=${req.ip}`,

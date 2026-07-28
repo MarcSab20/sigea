@@ -5,6 +5,19 @@ import { ConfigService } from '@nestjs/config';
 import { Request, Response } from 'express';
 import { firstValueFrom } from 'rxjs';
 
+// En-têtes à NE PAS retransmettre tels quels : soit dépendants de la connexion,
+// soit invalidés dès qu'on re-sérialise le corps (content-length !). Les laisser
+// passer corrompait les requêtes PATCH sans corps → 400 en aval.
+const STRIPPED_HEADERS = [
+  'host',
+  'content-length',
+  'connection',
+  'accept-encoding',
+  'transfer-encoding',
+  'if-none-match',
+  'if-modified-since',
+];
+
 @Injectable()
 export class ProxyService {
   private readonly logger = new Logger(ProxyService.name);
@@ -26,23 +39,31 @@ export class ProxyService {
     const qs = req.url.includes('?') ? '?' + req.url.split('?')[1] : '';
     const targetUrl = `${baseUrl}${targetPath}${qs}`;
 
-    this.logger.debug(`→ ${service}: ${req.method} ${targetUrl}`);
+    // En-têtes assainis : axios recalculera content-length selon le corps réel.
+    // (type inféré = IncomingHttpHeaders, compatible axios ; on retire des clés.)
+    const headers = { ...req.headers };
+    for (const h of STRIPPED_HEADERS) delete headers[h];
+
+    // Ne transmettre un corps que s'il en existe réellement un. Un PATCH/POST
+    // sans corps (soumettre, annuler, read-all…) ne doit PAS envoyer `{}`.
+    const method = req.method.toUpperCase();
+    const hasBody =
+      method !== 'GET' &&
+      method !== 'HEAD' &&
+      req.body != null &&
+      !(typeof req.body === 'object' && Object.keys(req.body).length === 0);
+
+    this.logger.debug(`→ ${service}: ${method} ${targetUrl}${hasBody ? '' : ' (sans corps)'}`);
 
     try {
       const response = await firstValueFrom(
         this.http.request({
           method: req.method,
           url: targetUrl,
-          data: req.body,
-          // Supprimer les headers de cache pour éviter les 304
-          headers: {
-            ...req.headers,
-            host: undefined,
-            'if-none-match': undefined,
-            'if-modified-since': undefined,
-          },
+          data: hasBody ? req.body : undefined,
+          headers,
           params: req.query,
-          // Accepter 304 comme succès valide
+          // Accepter 3xx/4xx comme réponses valides (on relaie le statut aval).
           validateStatus: (status) => status < 500,
         }),
       );
@@ -50,6 +71,12 @@ export class ProxyService {
       // 304 → renvoyer 200 avec corps vide (le client gère son cache)
       if (response.status === 304) {
         res.status(200).json({ status: 'ok' });
+        return;
+      }
+
+      // 204/205 : pas de corps à sérialiser.
+      if (response.status === 204 || response.status === 205) {
+        res.status(response.status).end();
         return;
       }
 

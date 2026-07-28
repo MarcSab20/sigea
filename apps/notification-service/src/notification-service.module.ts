@@ -2,6 +2,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
+import { SharedDatabaseModule } from '@sigea/shared-database';
 import { HealthModule } from './health/health.module';
 import { NotificationModule } from './notifications/notification.module';
 import { EventsConsumerModule } from './events/events-consumer.module';
@@ -20,6 +21,9 @@ import { EventsConsumerModule } from './events/events-consumer.module';
         verifyOptions: { algorithms: ['RS256'] },
       }),
     }),
+    // PrismaService (@Global) requis par HealthController, NotificationService
+    // et EventsConsumerService — était absent, d'où le crash au démarrage.
+    SharedDatabaseModule,
     HealthModule,
     NotificationModule,
     EventsConsumerModule,

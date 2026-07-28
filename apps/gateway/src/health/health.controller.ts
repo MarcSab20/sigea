@@ -1,18 +1,15 @@
 import { Controller, Get } from '@nestjs/common';
-import { HealthCheck, HealthCheckService, PrismaHealthIndicator } from '@nestjs/terminus';
-import { PrismaService } from '@sigea/shared-database';
 
+/**
+ * Health de la gateway : liveness pure.
+ * La gateway est un proxy sans base de données — elle NE doit pas injecter
+ * PrismaService (ce qui provoquait un crash de démarrage : PrismaService
+ * introuvable dans HealthModule). Les services métier, eux, sondent bien leur DB.
+ */
 @Controller('health')
 export class HealthController {
-  constructor(
-    private health: HealthCheckService,
-    private prismaIndicator: PrismaHealthIndicator,
-    private prisma: PrismaService,
-  ) {}
-
   @Get()
-  @HealthCheck()
   check() {
-    return this.health.check([() => this.prismaIndicator.pingCheck('db', this.prisma)]);
+    return { status: 'ok', service: 'gateway', ts: new Date().toISOString() };
   }
 }
