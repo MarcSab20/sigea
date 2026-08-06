@@ -1,17 +1,3 @@
-// apps/pdf-service/src/pdf/manifeste-template.ts
-//
-// Rendu HTML du manifeste d'escale, tampons de signature compris.
-//
-// Fonction PURE (données → HTML) : aucune dépendance NestJS, aucune I/O.
-// C'est ce qui permet de la prototyper et de la tester hors du service.
-// Puppeteer se contente ensuite de transformer ce HTML en PDF.
-//
-// Les 5 blocs de signature sont TOUJOURS dessinés, quel que soit l'avancement
-// du circuit : un bloc non encore signé apparaît en pointillés (emplacement
-// réservé), un bloc signé porte son tampon figé. C'est l'exigence « tous ces
-// VU et la signature sont présents sur le document quel que soit le niveau du
-// circuit ».
-
 import {
   EtapeValidation,
   MentionSignature,
@@ -92,35 +78,39 @@ function fmtDateCourte(d: Date | string | null | undefined): string {
 
 function tamponSvg(t: TamponData): string {
   const signe = t.statut === StatutValidation.APPROUVE && !!t.mention;
+  const INK = '#123a8f'; // encre bleu réglementaire (VU et ACCORD, conforme aux modèles)
 
   if (!signe) {
-    // Emplacement réservé : cercle en pointillés, étape nommée dessous.
+    // Emplacement réservé : cercle en pointillés « EN ATTENTE ».
     return `
-      <svg viewBox="0 0 150 150" class="tampon tampon-vide" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="75" cy="75" r="60" fill="none" stroke="#9aa" stroke-width="1.5" stroke-dasharray="5 4"/>
-        <text x="75" y="80" text-anchor="middle" class="t-attente">EN ATTENTE</text>
+      <svg viewBox="0 0 160 160" class="tampon" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="80" cy="80" r="68" fill="none" stroke="#b3bccd" stroke-width="1.6" stroke-dasharray="5 4"/>
+        <text x="80" y="85" text-anchor="middle" font-family="Arial, sans-serif" font-size="9.5"
+              fill="#9aa6b8" letter-spacing="1">EN ATTENTE</text>
       </svg>`;
   }
 
   const l1 = esc(t.tampon_ligne1);
   const l2 = t.tampon_ligne2 ? esc(t.tampon_ligne2) : '';
-  const dateStr = fmtDateCourte(t.date_heure);
+  const dateStr = esc(fmtDateCourte(t.date_heure));
+  const mention = esc(t.mention);
 
-  // Deux ou trois lignes selon la présence de tampon_ligne2 (COMBORD/COMBASE).
-  const lignesTexte = l2
-    ? `<text x="75" y="72" text-anchor="middle" class="t-l1">${l1}</text>
-       <text x="75" y="90" text-anchor="middle" class="t-l2">${l2}</text>`
-    : `<text x="75" y="82" text-anchor="middle" class="t-l1">${l1}</text>`;
+  // Rôle/signataire : 1 ligne (VU simple) ou 2 lignes (COMBORD/COMBASE).
+  const lignes = l2
+    ? `<text x="80" y="86" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="700" fill="${INK}">${l1}</text>
+       <text x="80" y="101" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" font-weight="600" fill="${INK}">${l2}</text>`
+    : `<text x="80" y="94" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="700" fill="${INK}">${l1}</text>`;
 
   return `
-    <svg viewBox="0 0 150 150" class="tampon tampon-signe" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="75" cy="75" r="62" fill="none" stroke="#123a8f" stroke-width="2.5"/>
-      <circle cx="75" cy="75" r="55" fill="none" stroke="#123a8f" stroke-width="1"/>
-      <text x="75" y="42" text-anchor="middle" class="t-mention">${esc(t.mention)}</text>
-      <line x1="30" y1="52" x2="120" y2="52" stroke="#123a8f" stroke-width="0.8"/>
-      ${lignesTexte}
-      <line x1="30" y1="102" x2="120" y2="102" stroke="#123a8f" stroke-width="0.8"/>
-      <text x="75" y="118" text-anchor="middle" class="t-date">${esc(dateStr)}</text>
+    <svg viewBox="0 0 160 160" class="tampon" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="80" cy="80" r="70" fill="none" stroke="${INK}" stroke-width="3"/>
+      <circle cx="80" cy="80" r="62" fill="none" stroke="${INK}" stroke-width="1.2"/>
+      <text x="80" y="56" text-anchor="middle" font-family="Arial, sans-serif" font-size="19"
+            font-weight="800" fill="${INK}" letter-spacing="1">${mention}</text>
+      <line x1="34" y1="64" x2="126" y2="64" stroke="${INK}" stroke-width="1"/>
+      ${lignes}
+      <line x1="42" y1="112" x2="118" y2="112" stroke="${INK}" stroke-width="0.8"/>
+      <text x="80" y="127" text-anchor="middle" font-family="Arial, sans-serif" font-size="8.5" fill="${INK}">${dateStr}</text>
     </svg>`;
 }
 
@@ -270,7 +260,7 @@ export function renderManifesteHtml(
   .bloc { text-align: center; border: 1px solid #dde; border-radius: 4px; padding: 6px 2px 4px; }
   .bloc-titre { font-size: 8px; font-weight: 700; color: #123a8f; text-transform: uppercase;
     margin-bottom: 4px; min-height: 22px; display: flex; align-items: center; justify-content: center; }
-  .tampon { width: 100%; height: auto; max-width: 92px; }
+  .tampon { width: 100%; height: auto; max-width: 96px; }
   .t-mention  { font-size: 15px; font-weight: 800; fill: #123a8f; letter-spacing: 1px; }
   .t-l1 { font-size: 11px; font-weight: 700; fill: #123a8f; }
   .t-l2 { font-size: 10px; font-weight: 600; fill: #123a8f; }

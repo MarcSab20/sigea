@@ -27,12 +27,12 @@ interface AeronefPosition {
 
 const BASES_POSITIONS: Base[] = [
   { code: 'BA101', nom: 'Base Aérienne 101', ville: 'Yaoundé',    lat: 3.8480,  lng: 11.5021, actif: true },
-  { code: 'BA102', nom: 'Base Aérienne 102', ville: 'Douala',     lat: 4.0061,  lng: 9.7069,  actif: true },
-  { code: 'BA201', nom: 'Base Aérienne 201', ville: 'Garoua',     lat: 9.3347,  lng: 13.3781, actif: true },
-  { code: 'BA301', nom: 'Base Aérienne 301', ville: 'Maroua',     lat: 10.5957, lng: 14.3273, actif: true },
+  { code: 'BA102', nom: 'Base Aérienne 102', ville: 'Bertoua',    lat: 4.5772,  lng: 13.6846, actif: true },
+  { code: 'BA201', nom: 'Base Aérienne 201', ville: 'Douala',     lat: 4.0061,  lng: 9.7069,  actif: true },
+  { code: 'BA301', nom: 'Base Aérienne 301', ville: 'Garoua',     lat: 9.3347,  lng: 13.3781, actif: true },
   { code: 'BA302', nom: 'Base Aérienne 302', ville: 'Ngaoundéré', lat: 7.3570,  lng: 13.5720, actif: true },
-  { code: 'BA401', nom: 'Base Aérienne 401', ville: 'Bafoussam',  lat: 5.4781,  lng: 10.4178, actif: true },
-  { code: 'BA501', nom: 'Base Aérienne 501', ville: 'Bertoua',    lat: 4.5853,  lng: 13.6844, actif: true },
+  { code: 'BA401', nom: 'Base Aérienne 401', ville: 'Maroua',     lat: 10.5957, lng: 14.3273, actif: true },
+  { code: 'BA501', nom: 'Base Aérienne 501', ville: 'Bamenda',    lat: 5.9597,  lng: 10.1494, actif: true },
 ];
 
 // Limites géographiques du Cameroun

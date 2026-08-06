@@ -32,7 +32,11 @@ api.interceptors.response.use(
   response => response,
   async error => {
     const originalRequest = error.config;
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    // Ne JAMAIS tenter de rafraîchir sur les endpoints d'auth eux-mêmes :
+    // un 401 de login/verify doit remonter à la page (sinon spinner infini).
+    const url: string = originalRequest?.url ?? '';
+    const isAuthFlow = /\/auth\/(login|refresh|verify-otp|activate-otp|verify-backup-code)/.test(url);
+    if (error.response?.status === 401 && !originalRequest._retry && !isAuthFlow) {
       if (isRefreshing) {
         return new Promise(resolve => {
           refreshQueue.push((token: string) => {

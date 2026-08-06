@@ -9,6 +9,9 @@ import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 
 const ERR = 'Authentification refusée';
+const MAX_ECHECS = 3;
+const COMPTE_VERROUILLE =
+  'Compte verrouillé apres plusieurs tentatives infructueuses. Contactez un administrateur pour le deverrouiller.';
 
 export interface LoginResult {
   step: 'MFA_SETUP' | 'MFA_VERIFY' | 'COMPLETE';
@@ -52,15 +55,39 @@ export class AuthService {
 
   async login(login: string, password: string, firstConnection: boolean, ctx: LoginContext): Promise<LoginResult> {
     const user = await this.prisma.utilisateur.findUnique({ where: { login } });
-    if (!user || !user.actif || user.verrouille_securite) {
-      if (user?.verrouille_securite) {
-        await this.security.notify(user.id, 'TENTATIVE_COMPTE_VERROUILLE', 'ALERTE', 'Tentative sur compte verrouillé', ctx.ip);
-      }
+    if (!user || !user.actif) {
       throw new UnauthorizedException(ERR);
     }
 
+    // Compte deja verrouille : message explicite. Seul l'administrateur peut le
+    // deverrouiller (POST /auth/admin/utilisateurs/:id/deverrouiller).
+    if (user.verrouille_securite) {
+      await this.security.notify(user.id, 'TENTATIVE_COMPTE_VERROUILLE', 'ALERTE', 'Tentative sur compte verrouillé', ctx.ip);
+      throw new UnauthorizedException(COMPTE_VERROUILLE);
+    }
+
+    // Mot de passe errone : incremente le compteur d'echecs consecutifs ; au
+    // MAX_ECHECS-ieme, verrouille le compte.
     if (!(await bcrypt.compare(password, user.password_hash))) {
-      throw new UnauthorizedException(ERR);
+      const echecs = user.nb_echecs_connexion + 1;
+      if (echecs >= MAX_ECHECS) {
+        await this.security.lockAccount(
+          user.id,
+          `Verrouillage automatique apres ${MAX_ECHECS} tentatives de connexion infructueuses`,
+          ctx.ip,
+        );
+        await this.prisma.utilisateur.update({ where: { id: user.id }, data: { nb_echecs_connexion: 0 } });
+        throw new UnauthorizedException(COMPTE_VERROUILLE);
+      }
+      await this.prisma.utilisateur.update({ where: { id: user.id }, data: { nb_echecs_connexion: echecs } });
+      throw new UnauthorizedException(
+        `Mot de passe incorrect. Tentative ${echecs}/${MAX_ECHECS} avant verrouillage du compte.`,
+      );
+    }
+
+    // Mot de passe correct : reinitialise le compteur si necessaire.
+    if (user.nb_echecs_connexion > 0) {
+      await this.prisma.utilisateur.update({ where: { id: user.id }, data: { nb_echecs_connexion: 0 } });
     }
 
     const hasSecret = await this.otp.hasActiveSecret(user.id);

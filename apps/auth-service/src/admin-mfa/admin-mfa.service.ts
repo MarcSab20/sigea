@@ -56,7 +56,7 @@ export class AdminMfaService {
 
   async unlock(userId: string, adminId: string, motif?: string) {
     await this.prisma.utilisateur.update({
-      where: { id: userId }, data: { verrouille_securite: false, motif_verrouillage: null },
+      where: { id: userId }, data: { verrouille_securite: false, motif_verrouillage: null, nb_echecs_connexion: 0 },
     });
     await this.security.notify(userId, 'COMPTE_DEVERROUILLE', 'INFO',
       `Compte déverrouillé par ${adminId}${motif ? ` — ${motif}` : ''}`);

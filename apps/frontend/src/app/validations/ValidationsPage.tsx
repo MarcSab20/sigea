@@ -1,6 +1,5 @@
 // apps/frontend/src/app/validations/ValidationsPage.tsx
 import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { manifesteApi, Manifeste } from '@/services/manifeste.service';
 import { useAuthStore } from '@/stores/auth.store';
 import { api } from '@/lib/api';
@@ -52,7 +51,6 @@ function EtapeProgress({ validations, flagSensible }: {
 }
 
 export default function ValidationsPage(): React.ReactElement {
-  const navigate = useNavigate();
   const { user } = useAuthStore();
   const [manifestes, setManifestes] = useState<Manifeste[]>([]);
   const [loading, setLoading] = useState(true);
@@ -284,7 +282,20 @@ export default function ValidationsPage(): React.ReactElement {
                 </div>
               )}
 
-              <button onClick={() => navigate(`/manifestes/${selected.id}`)}
+              <button onClick={async () => {
+                try {
+                  // Aperçu du manifeste AVEC les tampons de signature (le PDF).
+                  // Récupéré en blob authentifié (window.open n'enverrait pas le JWT).
+                  const res = await api.get(`/pdf/manifeste/${selected.id}`, { responseType: 'blob' });
+                  // Force le type PDF (au cas où la réponse ne serait pas étiquetée application/pdf).
+                  const blob = new Blob([res.data as BlobPart], { type: 'application/pdf' });
+                  const url = URL.createObjectURL(blob);
+                  window.open(url, '_blank');
+                  setTimeout(() => URL.revokeObjectURL(url), 60000);
+                } catch {
+                  toast.error("Impossible d'ouvrir l'aperçu du manifeste");
+                }
+              }}
                 style={{ width: '100%', marginTop: 10, padding: '8px',
                   background: T.blueBg, border: `1px solid ${T.blueBorder}`,
                   borderRadius: 6, color: T.blue, fontSize: 12,

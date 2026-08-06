@@ -154,6 +154,7 @@ model Utilisateur {
   mfa_enrolled        Boolean   @default(false)
   verrouille_securite Boolean   @default(false)
   motif_verrouillage  String?
+  nb_echecs_connexion Int       @default(0)
   last_login_ip       String?
   last_login_at       DateTime?
   notif_connexion     Boolean   @default(true)

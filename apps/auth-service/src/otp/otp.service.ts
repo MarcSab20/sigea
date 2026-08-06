@@ -7,7 +7,7 @@ import * as crypto from 'crypto';
 import * as QRCode from 'qrcode';
 
 const BASE32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-const PERIOD = 60;
+const PERIOD = 30;
 const DIGITS = 6;
 const DRIFT = 1;
 
