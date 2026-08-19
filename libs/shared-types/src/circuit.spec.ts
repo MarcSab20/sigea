@@ -6,13 +6,13 @@ import { EtapeValidation, MentionSignature, RoleUtilisateur } from './enums';
 
 describe('Circuit de validation SIGEA', () => {
   describe('ordre des étapes', () => {
-    it('suit le circuit métier CHEF_ESCALE → COMESO → COMGMO → COMBORD → COMBASE', () => {
+    it('suit le circuit métier CHEF_ESCALE → COMESO → COMGMO → COMBASE → COMBORD', () => {
       expect([...ETAPE_SEQUENCE]).toEqual([
         EtapeValidation.CHEF_ESCALE,
         EtapeValidation.COMESO,
         EtapeValidation.COMGMO,
-        EtapeValidation.COMBORD,
         EtapeValidation.COMBASE,
+        EtapeValidation.COMBORD,
       ]);
     });
 
@@ -65,19 +65,20 @@ describe('Circuit de validation SIGEA', () => {
   });
 
   describe('progression', () => {
-    it('enchaîne COMGMO → COMBORD → COMBASE → fin', () => {
-      expect(etapeSuivante(EtapeValidation.COMGMO)).toBe(EtapeValidation.COMBORD);
-      expect(etapeSuivante(EtapeValidation.COMBORD)).toBe(EtapeValidation.COMBASE);
-      expect(etapeSuivante(EtapeValidation.COMBASE)).toBeNull();
+    it('enchaîne COMGMO → COMBASE → COMBORD → fin', () => {
+      expect(etapeSuivante(EtapeValidation.COMGMO)).toBe(EtapeValidation.COMBASE);
+      expect(etapeSuivante(EtapeValidation.COMBASE)).toBe(EtapeValidation.COMBORD);
+      expect(etapeSuivante(EtapeValidation.COMBORD)).toBeNull();
     });
 
-    it('identifie COMBASE comme étape finale', () => {
-      expect(estEtapeFinale(EtapeValidation.COMBASE)).toBe(true);
-      expect(estEtapeFinale(EtapeValidation.COMBORD)).toBe(false);
+    it('identifie COMBORD comme étape finale', () => {
+      expect(estEtapeFinale(EtapeValidation.COMBORD)).toBe(true);
+      expect(estEtapeFinale(EtapeValidation.COMBASE)).toBe(false);
     });
 
     it('rend un rang nul pour une étape hors séquence', () => {
-      expect(rangEtape(EtapeValidation.COMBORD)).toBe(4);
+      expect(rangEtape(EtapeValidation.COMBASE)).toBe(4);
+      expect(rangEtape(EtapeValidation.COMBORD)).toBe(5);
       expect(rangEtape(EtapeValidation.CEMAA_SENSIBLE)).toBe(0);
     });
   });

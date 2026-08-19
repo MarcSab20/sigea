@@ -1,5 +1,6 @@
 // apps/notification-service/src/main.ts
 import { NestFactory } from '@nestjs/core';
+import { configurerOpenApi } from '@sigea/shared-openapi';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { NotificationServiceModule } from './notification-service.module';
 import { RedisIoAdapter } from './adapters/redis-io.adapter';
@@ -26,6 +27,14 @@ async function bootstrap(): Promise<void> {
       `WebSocket : adaptateur Redis indisponible (${(e as Error).message}) — repli mémoire`,
     );
   }
+  // Documentation OpenAPI. Neutralisée en production sauf OPENAPI_ENABLED=1 :
+  // voir configurerOpenApi(). À placer APRÈS setGlobalPrefix, sinon les chemins
+  // documentés omettraient le préfixe /api.
+  configurerOpenApi(app, {
+    titre: 'SIGEA — Service Notifications',
+    description: "API du service notifications du Système Intégré de Gestion des Escales Aériennes.",
+  });
+
 
   const port = process.env.PORT ?? 3007;
   await app.listen(port);

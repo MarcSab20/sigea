@@ -539,7 +539,7 @@ function SaisieManifestePage(): React.ReactElement {
             <div style={{ fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 16 }}>
               Circuit de validation
             </div>
-            {['COMESO','COMGMO','COMBORD','COMBASE'].map((etape, i) => {
+            {['COMESO','COMGMO','COMBASE','COMBORD'].map((etape, i) => {
               const v = manifeste.validations?.find(x => x.etape === etape);
               const col = !v ? T.textMute : v.statut === 'APPROUVE' ? T.green : v.statut === 'REJETE' ? T.red : T.amberLight;
               return (

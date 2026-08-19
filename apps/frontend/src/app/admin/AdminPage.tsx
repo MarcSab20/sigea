@@ -37,12 +37,12 @@ const ROLES = [
 
 const BASES_FAC = [
   { id: 'BA101', code: 'BA101', nom: 'Base Aérienne 101 Yaoundé',    region: 'Centre' },
-  { id: 'BA102', code: 'BA102', nom: 'Base Aérienne 102 Douala',     region: 'Littoral' },
-  { id: 'BA201', code: 'BA201', nom: 'Base Aérienne 201 Garoua',     region: 'Nord' },
-  { id: 'BA301', code: 'BA301', nom: 'Base Aérienne 301 Maroua',     region: 'Extrême-Nord' },
+  { id: 'BA102', code: 'BA201', nom: 'Base Aérienne 201 Douala',     region: 'Littoral' },
+  { id: 'BA201', code: 'BA301', nom: 'Base Aérienne 301 Garoua',     region: 'Nord' },
+  { id: 'BA301', code: 'BA401', nom: 'Base Aérienne 401 Maroua',     region: 'Extrême-Nord' },
   { id: 'BA302', code: 'BA302', nom: 'Base Aérienne 302 Ngaoundéré', region: 'Adamaoua' },
-  { id: 'BA401', code: 'BA401', nom: 'Base Aérienne 401 Bafoussam',  region: 'Ouest' },
-  { id: 'BA501', code: 'BA501', nom: 'Base Aérienne 501 Bertoua',    region: 'Est' },
+  { id: 'BA401', code: 'BA501', nom: 'Base Aérienne 501 Bamenda',  region: 'Nord-Ouest' },
+  { id: 'BA501', code: 'BA102', nom: 'Base Aérienne 102 Bertoua',    region: 'Est' },
 ];
 
 const GRADES = [

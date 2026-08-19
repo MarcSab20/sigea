@@ -132,6 +132,17 @@ export class ProxyController {
     return this.proxyService.forward(req, res, 'pdf');
   }
 
+  // ── VÉRIFICATION PUBLIQUE ──────────────────────────────────────────────────
+  //
+  // SANS JwtAuthGuard, délibérément : c'est le point de scan du QR imprimé sur
+  // le manifeste, utilisé par un contrôleur au sol qui n'a pas de compte SIGEA.
+  // Le pdf-service ne renvoie ici qu'un verdict d'authenticité — jamais le
+  // contenu du manifeste. Le débit y est limité côté service (20 req/min).
+  @All('verification/*path')
+  proxyVerification(@Req() req: Request, @Res() res: Response): Promise<void> {
+    return this.proxyService.forward(req, res, 'pdf');
+  }
+
   // ── ADMIN ──────────────────────────────────────────────────────────────────
   @All('admin')
   @UseGuards(JwtAuthGuard)

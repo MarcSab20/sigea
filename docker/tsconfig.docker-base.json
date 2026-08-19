@@ -41,6 +41,12 @@
       ],
       "@sigea/shared-messaging": [
         "libs/shared-messaging/src/index.ts"
+      ],
+      "@sigea/shared-openapi": [
+        "libs/shared-openapi/src/index.ts"
+      ],
+      "@sigea/shared-integrity": [
+        "libs/shared-integrity/src/index.ts"
       ]
     }
   },

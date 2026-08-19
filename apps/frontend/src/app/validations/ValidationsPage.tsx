@@ -15,7 +15,7 @@ function Card({ children, style={} }: { children: React.ReactNode; style?: React
   );
 }
 
-const ETAPE_ORDER = ['COMESO', 'COMGMO', 'COMBORD', 'CEMAA_SENSIBLE', 'COMBASE'];
+const ETAPE_ORDER = ['COMESO', 'COMGMO', 'CEMAA_SENSIBLE', 'COMBASE', 'COMBORD'];
 const ETAPE_ROLE: Record<string, string> = {
   COMESO: 'comeso', COMGMO: 'comgmo', COMBORD: 'combord',
   CEMAA_SENSIBLE: 'cemaa', COMBASE: 'combase',

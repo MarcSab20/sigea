@@ -10,6 +10,7 @@ import { PdfService } from './pdf/pdf.service';
 import { PdfController } from './pdf/pdf.controller';
 import { ManifesteDataService } from './pdf/manifeste-data.service';
 import { HealthModule } from './health/health.module';
+import { VerificationModule } from './verification/verification.module';
 import { JwtStrategy } from './strategies/jwt.strategy';
 
 @Module({
@@ -24,6 +25,9 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     }),
     SharedDatabaseModule,
     SharedCryptoModule,
+    // Expose l'endpoint public /verification et fournit AuthenticiteService,
+    // dont ManifesteDataService a besoin pour composer le cartouche QR.
+    VerificationModule,
     HealthModule,
   ],
   controllers: [PdfController],

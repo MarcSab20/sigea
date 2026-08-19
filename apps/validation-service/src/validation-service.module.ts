@@ -5,6 +5,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { SharedDatabaseModule } from '@sigea/shared-database';
 import { AuditModule } from '@sigea/shared-audit';
+import { IntegrityModule } from '@sigea/shared-integrity';
 import { MessagingModule } from '@sigea/shared-messaging';
 import { ValidationStateMachine } from './state-machine/validation-state-machine';
 import { ValidationController } from './validation/validation.controller';
@@ -24,6 +25,9 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     }),
     SharedDatabaseModule,
     AuditModule,
+    // Historisation du contenu signé : SnapshotService, injecté dans la
+    // machine à états de validation.
+    IntegrityModule,
     MessagingModule,
     HealthModule,
   ],

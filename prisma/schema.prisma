@@ -320,6 +320,7 @@ model Manifeste {
   marchandises        MarchandiseDangereuse[]
   equipages           Equipage[]
   validations         ValidationEtape[]
+  snapshots           ManifesteSnapshot[]
   alertes             AlerteEscale[]
   compte_rendu        CompteRenduCemaa?
   createdAt           DateTime                @default(now())
@@ -566,4 +567,51 @@ enum TypeNotification {
   MANIFESTE_COMPLETE
   CONSIGNE_CEMAA
   ALERTE
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Historisation du contenu signé
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Instantané immuable du contenu métier d'un manifeste, figé au
+/// franchissement d'une étape du circuit.
+///
+/// ValidationEtape répond à « qui a signé, et quand ». ManifesteSnapshot
+/// répond à « sur QUOI ». Sans lui, un manifeste rejeté puis corrigé perd
+/// toute trace de l'état sur lequel les signataires amont s'étaient prononcés.
+///
+/// Aucune écriture après création : ni update, ni delete hors cascade. Deux
+/// triggers PostgreSQL le garantissent au niveau du SGBD (voir la migration).
+model ManifesteSnapshot {
+  id              String    @id @default(uuid())
+  manifeste_id    String
+  manifeste       Manifeste @relation(fields: [manifeste_id], references: [id], onDelete: Cascade)
+
+  /// Étape franchie au moment du figeage. Chaîne libre et non enum : le
+  /// circuit peut évoluer, un instantané de 2026 doit rester lisible même si
+  /// l'étape correspondante disparaît de EtapeValidation.
+  ///
+  /// Les passages répétés sur une même étape (rejet, correction, nouveau
+  /// rejet) sont suffixés « ETAPE#1 », « ETAPE#2 »… pour ne pas s'écraser.
+  etape           String
+
+  /// Valeur de Manifeste.version à l'instant du figeage.
+  version_contenu Int
+  /// Version de l'algorithme de canonicalisation (@sigea/shared-integrity).
+  /// Permet de revérifier une empreinte ancienne avec l'algorithme de son époque.
+  version_format  Int       @default(1)
+
+  /// SHA-256 hexadécimal du payload canonique.
+  hash            String
+  /// Forme canonique intégrale, conservée pour l'expertise : elle permet de
+  /// rejouer le calcul et de montrer ce qui a été signé, pas seulement de
+  /// constater une divergence.
+  payload         String
+
+  validateur_id   String?
+  createdAt       DateTime  @default(now())
+
+  @@unique([manifeste_id, etape], name: "manifeste_id_etape")
+  @@index([manifeste_id, createdAt])
+  @@index([hash])
 }

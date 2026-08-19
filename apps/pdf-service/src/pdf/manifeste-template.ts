@@ -44,6 +44,25 @@ export interface ManifesteRenderData {
   marchandises?: { designation?: string; classe_onu?: string; poids_kg?: number | string }[];
   equipages?:    { nom?: string; prenom?: string; fonction?: string }[];
   validations?:  TamponData[];
+
+  /**
+   * Cartouche d'authenticité. Absent tant qu'aucun instantané n'a été figé
+   * (manifeste en brouillon) : le document est alors imprimé sans QR, ce qui
+   * est correct — il n'y a rien à authentifier.
+   */
+  authenticite?: {
+    /** Empreinte SHA-256 complète du dernier instantané. */
+    hash: string;
+    /** Forme courte imprimée en clair, recopiable si le QR est abîmé. */
+    hash_court: string;
+    /** Étape à laquelle l'empreinte a été figée. */
+    etape: string;
+    date: Date | string;
+    /** Image PNG du QR, en data URI. Généré par PdfService. */
+    qr_data_uri: string;
+    /** URL encodée dans le QR, affichée en clair sous le cartouche. */
+    url: string;
+  } | null;
 }
 
 // ─── Utilitaires ───────────────────────────────────────────────────────────
@@ -190,6 +209,36 @@ function filigrane(watermark: string): string {
   return `<div class="watermark">${esc(watermark)}</div>`;
 }
 
+/**
+ * Cartouche d'authenticité imprimé en pied de document.
+ *
+ * Le QR porte l'URL de vérification ; l'empreinte courte est imprimée en clair
+ * à côté pour rester exploitable si le code est déchiré, mouillé ou photocopié
+ * de travers — situation banale sur un tarmac.
+ */
+function cartoucheAuthenticite(data: ManifesteRenderData): string {
+  const a = data.authenticite;
+  if (!a) {
+    return `<div class="auth auth-absent">
+      <div class="auth-txt">
+        <div class="auth-t">Document non authentifiable</div>
+        <div class="auth-d">Aucune empreinte n'a été figée pour cet état du manifeste.
+        Ce tirage est un document de travail et n'a pas valeur de pièce vérifiable.</div>
+      </div>
+    </div>`;
+  }
+  return `<div class="auth">
+    <img class="auth-qr" src="${esc(a.qr_data_uri)}" alt="QR de vérification"/>
+    <div class="auth-txt">
+      <div class="auth-t">Vérification d'authenticité</div>
+      <div class="auth-d">Scanner le code, ou saisir l'empreinte sur&nbsp;:<br/>
+        <span class="auth-url">${esc(a.url.split('?')[0])}</span></div>
+      <div class="auth-h">Empreinte SHA-256 : <b>${esc(a.hash_court)}</b></div>
+      <div class="auth-d">Figée à l'étape ${esc(a.etape)} le ${esc(fmtDate(a.date))}</div>
+    </div>
+  </div>`;
+}
+
 // ─── Document complet ──────────────────────────────────────────────────────
 
 export function renderManifesteHtml(
@@ -273,6 +322,19 @@ export function renderManifesteHtml(
   .statut-VALIDE { color: #1a7a34; }
   .statut-REJETE { color: #b00; }
   .statut-EN_VALIDATION, .statut-SOUMIS { color: #c8860a; }
+
+  .auth { margin-top: 12px; border: 1px solid #123a8f; border-radius: 4px;
+    padding: 7px 9px; display: flex; gap: 10px; align-items: center;
+    background: #f6f8fd; page-break-inside: avoid; }
+  .auth-absent { border-color: #c9a227; background: #fdfaf0; }
+  .auth-qr { width: 76px; height: 76px; flex-shrink: 0; }
+  .auth-t { font-size: 9.5px; font-weight: 700; color: #123a8f;
+    text-transform: uppercase; letter-spacing: 0.06em; }
+  .auth-absent .auth-t { color: #8a6d0b; }
+  .auth-d { font-size: 8px; color: #555; line-height: 1.45; margin-top: 2px; }
+  .auth-url { font-family: 'Consolas', monospace; color: #123a8f; }
+  .auth-h { font-size: 9px; margin-top: 3px; font-family: 'Consolas', monospace;
+    letter-spacing: 0.08em; color: #1a1a1a; }
 </style>
 </head>
 <body>
@@ -308,6 +370,8 @@ export function renderManifesteHtml(
       <h2 class="section">Circuit de validation</h2>
       <div class="blocs">${blocs}</div>
     </div>
+
+    ${cartoucheAuthenticite(data)}
 
     <footer>
       <span>SIGEA — Document ${esc(data.statut === 'VALIDE' ? 'validé' : 'en cours de validation')}</span>

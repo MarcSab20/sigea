@@ -1,0 +1,12 @@
+{
+  "name": "shared-openapi",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/shared-openapi/src",
+  "projectType": "library",
+  "targets": {
+    "build": { "executor": "@nx/js:tsc", "options": { "outputPath": "dist/libs/shared-openapi", "main": "libs/shared-openapi/src/index.ts", "tsConfig": "libs/shared-openapi/tsconfig.lib.json" } },
+    "test": { "executor": "@nx/jest:jest", "options": { "jestConfig": "libs/shared-openapi/jest.config.ts" } },
+    "lint": { "executor": "@nx/eslint:lint", "options": { "lintFilePatterns": ["libs/shared-openapi/**/*.ts"] } }
+  },
+  "tags": ["type:lib", "scope:shared-openapi"]
+}

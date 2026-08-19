@@ -14,8 +14,8 @@ export const ETAPE_SEQUENCE: readonly EtapeValidation[] = [
   EtapeValidation.CHEF_ESCALE,
   EtapeValidation.COMESO,
   EtapeValidation.COMGMO,
-  EtapeValidation.COMBORD,
   EtapeValidation.COMBASE,
+  EtapeValidation.COMBORD,
 ] as const;
 
 /** Les 5 blocs de signature imprimés sur le manifeste, dans l'ordre du document. */

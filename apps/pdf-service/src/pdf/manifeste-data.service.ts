@@ -8,10 +8,14 @@ import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/commo
 import { PrismaService } from '@sigea/shared-database';
 import { NiveauConfidentialite, RoleUtilisateur, JwtPayload } from '@sigea/shared-types';
 import { ManifesteRenderData, TamponData } from './manifeste-template';
+import { AuthenticiteService } from '../verification/authenticite.service';
 
 @Injectable()
 export class ManifesteDataService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly authenticite: AuthenticiteService,
+  ) {}
 
   async charger(
     manifeste_id: string,
@@ -128,6 +132,10 @@ export class ManifesteDataService {
         date_heure:       v.date_heure,
       })),
     };
+
+    // Cartouche d'authenticité : null en l'absence d'instantané (brouillon, ou
+    // manifeste antérieur à l'historisation). Le template gère les deux cas.
+    data.authenticite = await this.authenticite.cartouche(m.id);
 
     // Niveau de confidentialité dérivé de la sensibilité du vol. Le schéma ne
     // stocke pas de niveau explicite ; flag_sensible est le seul signal fiable.

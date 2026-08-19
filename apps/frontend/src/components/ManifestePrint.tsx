@@ -19,7 +19,7 @@ interface ManifestePrintProps {
   onClose: () => void;
 }
 
-const ETAPES_ORDRE = ['COMESO', 'COMGMO', 'COMBORD', 'COMBASE', 'CEMAA_SENSIBLE'];
+const ETAPES_ORDRE = ['COMESO', 'COMGMO', 'CEMAA_SENSIBLE', 'COMBASE' , 'COMBORD'];
 
 const ROLE_LABELS: Record<string, string> = {
   COMESO:        'Chef des Opérations Sol',

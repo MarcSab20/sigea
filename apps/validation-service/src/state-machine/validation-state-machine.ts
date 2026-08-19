@@ -6,6 +6,8 @@
 //   • une étape ne peut être franchie que si c'est SON tour (etape_courante) ;
 //   • le tampon est composé et FIGÉ à l'instant de la signature ;
 //   • un manifeste sensible ne peut atteindre le COMBASE sans accord CEMAA ;
+//   • le COMBORD signe en dernier, après le COMBASE : c'est lui qui clôt le
+//     circuit et rend le manifeste opérationnel ;
 //   • l'avancement est un compare-and-swap atomique : deux validateurs
 //     simultanés ne peuvent pas franchir la même étape deux fois.
 //
@@ -36,6 +38,7 @@ import {
 } from '@sigea/shared-types';
 import { EVENTS } from '@sigea/shared-events';
 import { EventPublisher } from '@sigea/shared-messaging';
+import { SnapshotService } from '@sigea/shared-integrity';
 
 /** Vue de l'avancement, destinée à l'IHM et à l'impression des 5 blocs. */
 export interface AvancementCircuit {
@@ -72,6 +75,7 @@ export class ValidationStateMachine {
   constructor(
     private readonly prisma: PrismaService,
     private readonly events: EventPublisher,
+    private readonly snapshots: SnapshotService,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -164,7 +168,7 @@ export class ValidationStateMachine {
         throw new ConflictException('Étape déjà franchie par un autre validateur');
       }
 
-      return tx.validationEtape.upsert({
+      const visa = await tx.validationEtape.upsert({
         where:  { manifeste_id_etape: { manifeste_id, etape } },
         update: {
           statut:      StatutValidation.APPROUVE,
@@ -182,6 +186,14 @@ export class ValidationStateMachine {
           ...(tampon ?? {}),
         },
       });
+
+      // Historisation du contenu signé, DANS la transaction : soit l'étape est
+      // franchie ET le contenu figé, soit ni l'un ni l'autre. Un visa sans
+      // instantané serait une signature dont on ignore l'objet — précisément
+      // le trou que cette table comble.
+      await this.snapshots.figer(manifeste_id, etape, user.sub, tx);
+
+      return visa;
     });
 
     this.logger.log(
@@ -196,8 +208,18 @@ export class ValidationStateMachine {
     });
 
     if (termine) {
+      // Le circuit est désormais clos par le COMBORD, pas par le COMBASE :
+      // `user.sub` n'est donc plus le signataire COMBASE. On relit le visa
+      // COMBASE déjà apposé (garanti présent, il précède le COMBORD dans la
+      // séquence) plutôt que de publier l'identité du mauvais validateur.
+      const visaCombase = manifeste.validations.find(
+        (v) => v.etape === EtapeValidation.COMBASE && v.statut === StatutValidation.APPROUVE,
+      );
+
       await this.events.publish(EVENTS.MANIFESTE_COMPLETED, {
-        ...ctx, flag_sensible: manifeste.flag_sensible, validateur_combase_id: user.sub,
+        ...ctx,
+        flag_sensible: manifeste.flag_sensible,
+        validateur_combase_id: visaCombase?.validateur_id ?? user.sub,
       });
     }
 
@@ -238,8 +260,15 @@ export class ValidationStateMachine {
         throw new ConflictException('Étape déjà traitée par un autre validateur');
       }
 
+      // L'état rejeté est figé AVANT la purge : c'est le seul moment où le
+      // contenu exact soumis aux signataires amont est encore intact. Après le
+      // deleteMany, la trace de ce sur quoi ils s'étaient prononcés serait
+      // définitivement perdue.
+      await this.snapshots.figer(manifeste_id, `${etape}_REJET`, user.sub, tx, { versionner: true });
+
       // Purge des visas amont, tampons compris : ils ne doivent pas survivre
-      // à une correction du contenu.
+      // à une correction du contenu. Les INSTANTANÉS, eux, sont conservés —
+      // ils constituent l'historique probant du dossier.
       await tx.validationEtape.deleteMany({
         where: { manifeste_id, etape: { not: etape } },
       });
@@ -417,8 +446,12 @@ export class ValidationStateMachine {
   // ─────────────────────────────────────────────────────────────────────────
 
   /**
-   * Sur un manifeste sensible, le verrou CEMAA s'intercale entre le COMBORD
+   * Sur un manifeste sensible, le verrou CEMAA s'intercale entre le COMGMO
    * et le COMBASE. Sur un manifeste ordinaire, il n'existe pas.
+   *
+   * Le verrou reste indexé sur COMBASE, pas sur la fin du circuit : depuis
+   * l'inversion COMBASE/COMBORD, l'étape finale est le COMBORD, mais c'est
+   * toujours l'accord du commandant de base que le CEMAA conditionne.
    */
   private prochaineEtape(etape: EtapeValidation, sensible: boolean): EtapeValidation | null {
     if (etape === EtapeValidation.CEMAA_SENSIBLE) return EtapeValidation.COMBASE;
