@@ -10,11 +10,20 @@ import { CreateVolDto } from './dto/create-vol.dto';
 export class VolsController {
   constructor(private readonly volsService: VolsService) {}
 
+  /**
+   * Planification d'un vol.
+   *
+   * Réservée au COMBASE et au COMGMO — les deux autorités qui engagent les
+   * moyens de la base — ainsi qu'à l'ADMIN pour l'exploitation du système.
+   *
+   * `@CurrentUser` est indispensable : la base de départ du vol est celle du
+   * créateur, imposée par le service et non lue dans le corps de la requête.
+   */
   @Post()
-  @Roles(RoleUtilisateur.ADMIN, RoleUtilisateur.COMBASE)
+  @Roles(RoleUtilisateur.ADMIN, RoleUtilisateur.COMBASE, RoleUtilisateur.COMGMO)
   @UseGuards(RolesGuard)
-  create(@Body() dto: CreateVolDto): Promise<unknown> {
-    return this.volsService.create(dto);
+  create(@Body() dto: CreateVolDto, @CurrentUser() user: JwtPayload): Promise<unknown> {
+    return this.volsService.create(dto, user);
   }
 
   @Get()

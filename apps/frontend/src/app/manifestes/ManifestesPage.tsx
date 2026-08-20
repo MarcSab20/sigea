@@ -171,19 +171,45 @@ function NouveauManifestePage(): React.ReactElement {
   const [vols, setVols] = useState<Vol[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [volId, setVolId] = useState(searchParams.get('vol') ?? '');
-  const [etapeVol, setEtapeVol] = useState('A');
+
+  const user = useAuthStore(st => st.user);
 
   useEffect(() => {
     volApi.list().then(setVols).catch(() => {});
   }, []);
 
-  const volSelectionne = vols.find(v => v.id === volId);
+  /**
+   * Vols sur lesquels ce chef d'escale peut établir un manifeste.
+   *
+   * `GET /vols` renvoie tous les vols touchant sa base, arrivée comprise. Or on
+   * n'embarque pas au terminus : seuls le DÉPART et les ESCALES sont des points
+   * de saisie. Sur un vol avec correspondance, chaque escale relève du chef
+   * d'escale de cette escale, et de lui seul.
+   *
+   * Ce filtrage est ergonomique — il évite de proposer un vol qui serait refusé.
+   * Le contrôle qui fait foi est celui du manifeste-service.
+   */
+  const volsEligibles = vols.filter(v =>
+    user?.base_id && (
+      v.base_depart_id === user.base_id ||
+      (v.escales ?? []).some(e => e.base_id === user.base_id)
+    ),
+  );
+
+  const volSelectionne = volsEligibles.find(v => v.id === volId);
+
+  /** Point d'embarquement du chef d'escale sur le vol retenu. */
+  const roleSurVol = !volSelectionne || !user?.base_id ? null
+    : volSelectionne.base_depart_id === user.base_id ? 'Départ'
+    : 'Correspondance';
 
   const handleCreate = async (): Promise<void> => {
     if (!volId) { toast.error('Sélectionnez un vol'); return; }
     setSubmitting(true);
     try {
-      const m = await manifesteApi.create({ vol_id: volId, etape_vol: etapeVol });
+      // etape_vol n'est plus transmis : le backend la déduit de la position de
+      // la base sur la route du vol.
+      const m = await manifesteApi.create({ vol_id: volId });
       toast.success(
         estIdentifiantLocal(m.id)
           ? 'Manifeste créé hors ligne — il sera transmis au retour du réseau'
@@ -202,16 +228,26 @@ function NouveauManifestePage(): React.ReactElement {
         <p style={{ fontSize: 13, color: T.textDim, marginTop: 4 }}>Rattachement à un vol planifié</p>
       </div>
       <Card style={{ padding: '24px 28px' }}>
-        {vols.length === 0 ? (
+        {volsEligibles.length === 0 ? (
           <div style={{ padding: '16px', background: T.amberBg, border: `1px solid ${T.amberBorder}`,
-            borderRadius: 6, marginBottom: 20, fontSize: 12, color: T.amber }}>
-            ⚠ Aucun vol disponible — <button onClick={() => navigate('/vols/nouveau')} style={{
-              background: 'none', border: 'none', color: T.blue, cursor: 'pointer',
-              fontSize: 12, textDecoration: 'underline' }}>créer un vol d'abord</button>
+            borderRadius: 6, marginBottom: 20, fontSize: 12, color: T.amber, lineHeight: 1.6 }}>
+            {/* Distinguer les deux causes : aucun vol du tout, ou des vols qui
+                ne passent par cette base qu'à l'arrivée. Le second cas est le
+                plus déroutant — l'utilisateur VOIT des vols dans l'onglet Vols
+                mais n'en trouve aucun ici. */}
+            {vols.length === 0 ? (
+              <>⚠ Aucun vol planifié touchant votre base. Un COMBASE ou un COMGMO doit
+                d'abord en planifier un.</>
+            ) : (
+              <>⚠ Aucun vol ne part de votre base ({user?.base_id}) et aucun n'y fait escale.
+                Les {vols.length} vol{vols.length > 1 ? 's' : ''} visible{vols.length > 1 ? 's' : ''} dans
+                l'onglet Vols n'y passe{vols.length > 1 ? 'nt' : ''} qu'à l'arrivée : on n'embarque
+                pas au terminus, il n'y a donc pas de manifeste à y établir.</>
+            )}
           </div>
         ) : (
           <Field label="Vol de rattachement" value={volId} onChange={setVolId} required
-            options={vols.map(v => ({
+            options={volsEligibles.map(v => ({
               value: v.id,
               label: `${v.numero_mission} · ${v.immatriculation} · ${new Date(v.date_heure).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}`
             }))} />
@@ -237,13 +273,26 @@ function NouveauManifestePage(): React.ReactElement {
           </div>
         )}
 
-        <Field label="Étape du vol" value={etapeVol} onChange={setEtapeVol}
-          options={[
-            { value: 'A', label: 'A — Départ (manifeste maître)' },
-            { value: 'B', label: 'B — 1ère escale intermédiaire' },
-            { value: 'C', label: 'C — 2ème escale intermédiaire' },
-            { value: 'D', label: 'D — Terminus' },
-          ]} />
+        {/* L'étape n'est plus choisie : elle découle de la position de votre base
+            sur la route du vol. La laisser libre permettait de revendiquer une
+            étape tenue par un autre chef d'escale, ou inexistante sur ce vol. */}
+        {volSelectionne && (
+          <div style={{ padding: '12px 16px', background: T.bgAlt,
+            border: `1px solid ${T.border}`, borderRadius: 6, marginBottom: 16 }}>
+            <div style={{ fontSize: 10, color: T.textDim, marginBottom: 3,
+              textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              Votre point d'embarquement
+            </div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>
+              {roleSurVol === 'Départ'
+                ? `${user?.base_id} — base de départ (manifeste maître)`
+                : `${user?.base_id} — escale de correspondance`}
+            </div>
+            <div style={{ fontSize: 11, color: T.textDim, marginTop: 4 }}>
+              L'étape du manifeste est déterminée par cette position sur la route du vol.
+            </div>
+          </div>
+        )}
 
         <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 8 }}>
           <button onClick={() => navigate('/manifestes')} style={{

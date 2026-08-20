@@ -8,12 +8,12 @@ import { toast } from 'sonner';
 
 const BASES_FAC = [
   { id: 'BA101', code: 'BA 101', nom: 'Yaoundé' },
-  { id: 'BA102', code: 'BA 102', nom: 'Douala' },
-  { id: 'BA201', code: 'BA 201', nom: 'Garoua' },
-  { id: 'BA301', code: 'BA 301', nom: 'Maroua' },
+  { id: 'BA201', code: 'BA 201', nom: 'Douala' },
+  { id: 'BA301', code: 'BA 301', nom: 'Garoua' },
+  { id: 'BA401', code: 'BA 401', nom: 'Maroua' },
   { id: 'BA302', code: 'BA 302', nom: 'Ngaoundéré' },
-  { id: 'BA401', code: 'BA 401', nom: 'Bafoussam' },
-  { id: 'BA501', code: 'BA 501', nom: 'Bertoua' },
+  { id: 'BA501', code: 'BA 501', nom: 'Bamenda' },
+  { id: 'BA102', code: 'BA 102', nom: 'Bertoua' },
 ];
 
 const CATEGORIES = ['TROUPES','TROUPES_PARA','CHEF_MIL','MISSION','OP_SENSIBLE','VIP'];

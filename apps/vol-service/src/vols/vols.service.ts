@@ -6,7 +6,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '@sigea/shared-database';
-import { StatutVol, TypeMission } from '@sigea/shared-types';
+import { StatutVol, TypeMission, RoleUtilisateur, JwtPayload } from '@sigea/shared-types';
 import { Prisma } from '@prisma/client';
 import { CreateVolDto } from './dto/create-vol.dto';
 
@@ -14,7 +14,35 @@ import { CreateVolDto } from './dto/create-vol.dto';
 export class VolsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(dto: CreateVolDto): Promise<unknown> {
+  /**
+   * Planifie un vol.
+   *
+   * ── Base de départ imposée ──
+   * La base de départ n'est PAS lue dans le DTO : c'est la base d'affectation
+   * du créateur. Un COMBASE ou un COMGMO planifie les vols AU DÉPART DE SA
+   * BASE, jamais d'ailleurs.
+   *
+   * Auparavant, `create` ne recevait même pas l'utilisateur : la base venait du
+   * formulaire, et rien n'empêchait un commandant de base de Yaoundé de créer
+   * un vol Douala → Garoua qu'il ne pourrait ensuite jamais consulter, la
+   * lecture étant cloisonnée alors que l'écriture ne l'était pas. C'est cette
+   * asymétrie qui produisait des vols invisibles.
+   *
+   * L'ADMIN fait exception et peut désigner une base de départ, n'ayant pas de
+   * périmètre opérationnel propre. S'il n'en fournit pas, la sienne s'applique.
+   */
+  async create(dto: CreateVolDto, user: JwtPayload): Promise<unknown> {
+    const base_depart_id =
+      user.role === RoleUtilisateur.ADMIN
+        ? (dto.base_depart_id ?? user.base_id)
+        : user.base_id;
+
+    if (!base_depart_id) {
+      throw new BadRequestException(
+        "Votre compte n'a pas de base d'affectation : impossible de planifier un vol.",
+      );
+    }
+
     // ── Contrôles référentiels avant écriture ──
     const aeronef = await this.prisma.aeronef.findUnique({
       where: { immatriculation: dto.immatriculation },
@@ -25,8 +53,10 @@ export class VolsService {
     if (!aeronef.actif) {
       throw new BadRequestException(`Aéronef ${dto.immatriculation} inactif`);
     }
-    if (dto.base_depart_id === dto.base_arrivee_id) {
-      throw new BadRequestException("Base de départ et base d'arrivée identiques");
+    if (base_depart_id === dto.base_arrivee_id) {
+      throw new BadRequestException(
+        `La base d'arrivée ne peut pas être votre base de départ (${base_depart_id}).`,
+      );
     }
 
     // Les capacités déclarées ne peuvent excéder l'aéronef réellement affecté.
@@ -42,7 +72,7 @@ export class VolsService {
     }
 
     const escales = dto.escales ?? [];
-    const basesRoute = [dto.base_depart_id, dto.base_arrivee_id, ...escales.map((e) => e.base_id)];
+    const basesRoute = [base_depart_id, dto.base_arrivee_id, ...escales.map((e) => e.base_id)];
 
     // Toutes les bases de la route doivent exister — sinon la FK échouerait
     // avec un message Prisma illisible pour l'utilisateur.
@@ -60,7 +90,7 @@ export class VolsService {
     // La contrainte @@unique([vol_id, base_id]) le refuserait de toute façon :
     // autant renvoyer un message clair plutôt qu'une erreur de contrainte.
     for (const e of escales) {
-      if (e.base_id === dto.base_depart_id || e.base_id === dto.base_arrivee_id) {
+      if (e.base_id === base_depart_id || e.base_id === dto.base_arrivee_id) {
         throw new BadRequestException(`L'escale ${e.base_id} est déjà le départ ou l'arrivée du vol`);
       }
       if (e.capacite_places > aeronef.capacite_places) {
@@ -82,7 +112,7 @@ export class VolsService {
           numero_mission:    dto.numero_mission,
           immatriculation:   dto.immatriculation,
           date_heure:        new Date(dto.date_heure),
-          base_depart_id:    dto.base_depart_id,
+          base_depart_id:    base_depart_id,
           base_arrivee_id:   dto.base_arrivee_id,
           type_mission:      dto.type_mission,
           flag_sensible:     dto.type_mission === TypeMission.OP_SENSIBLE,
@@ -136,7 +166,9 @@ export class VolsService {
         base_arrivee: { select: { code_base: true, nom: true } },
         aeronef:      { select: { immatriculation: true, type: true } },
         escales: {
-          select: { ordre: true, base: { select: { code_base: true, nom: true } } },
+          // base_id explicite : le frontend s'en sert pour déterminer si le
+          // chef d'escale connecté tient une correspondance sur ce vol.
+          select: { ordre: true, base_id: true, base: { select: { code_base: true, nom: true } } },
           orderBy: { ordre: 'asc' },
         },
       },

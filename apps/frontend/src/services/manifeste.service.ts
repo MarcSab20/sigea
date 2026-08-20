@@ -4,11 +4,19 @@ import {
 } from '@/offline/outbox';
 import * as brouillons from '@/offline/brouillons';
 
+export interface EscaleVol {
+  ordre: number;
+  base_id?: string;
+  base?: { code_base: string; nom: string };
+}
+
 export interface Vol {
   id: string; numero_mission: string; immatriculation: string;
   date_heure: string; base_depart_id: string; base_arrivee_id: string;
   type_mission: string; flag_sensible: boolean;
   capacite_places: number; capacite_cargo_kg: number; statut: string;
+  /** Escales dans l'ordre de la route. Renvoyées par GET /vols. */
+  escales?: EscaleVol[];
 }
 
 export interface Manifeste {

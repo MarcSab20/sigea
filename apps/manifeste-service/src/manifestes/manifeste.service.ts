@@ -1,5 +1,5 @@
 // apps/manifeste-service/src/manifestes/manifeste.service.ts
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '@sigea/shared-database';
 import {
   StatutManifeste, CategoriePassager, EtapeValidation, StatutValidation,
@@ -24,11 +24,58 @@ export class ManifesteService {
     // produisait des manifestes ordinaires, contournant le verrou.
     const vol = await this.prisma.vol.findUnique({
       where: { id: data.vol_id },
-      select: { id: true, flag_sensible: true, statut: true },
+      select: {
+        id: true, flag_sensible: true, statut: true, numero_mission: true,
+        base_depart_id: true, base_arrivee_id: true,
+        escales: { select: { base_id: true, ordre: true }, orderBy: { ordre: 'asc' } },
+      },
     });
     if (!vol) throw new NotFoundException(`Vol ${data.vol_id} introuvable`);
     if (vol.statut === 'ANNULE') {
       throw new BadRequestException('Impossible de créer un manifeste sur un vol annulé');
+    }
+
+    // ── Cloisonnement sur la route du vol ──
+    //
+    // Un chef d'escale n'établit un manifeste que pour un point où il embarque
+    // réellement : sa base de départ, ou l'escale dont il a la charge sur un
+    // vol avec correspondance. Il n'a rien à saisir pour une escale tenue par
+    // un autre, ni pour la base d'arrivée où plus personne n'embarque.
+    //
+    // Sans ce contrôle, `base_id` était simplement recopié depuis le jeton :
+    // n'importe quel chef d'escale pouvait créer un manifeste sur n'importe
+    // quel vol, y compris un vol ne passant jamais par sa base — manifeste que
+    // le circuit de validation aurait ensuite fait remonter à des signataires
+    // sans rapport avec la mission.
+    const escale = vol.escales.find((e) => e.base_id === data.base_id);
+    const estDepart = vol.base_depart_id === data.base_id;
+
+    if (!estDepart && !escale) {
+      const route = [vol.base_depart_id, ...vol.escales.map((e) => e.base_id), vol.base_arrivee_id];
+      throw new ForbiddenException(
+        `Votre base (${data.base_id}) n'est ni le départ ni une escale du vol ` +
+          `${vol.numero_mission} (${route.join(' → ')}). Vous ne pouvez pas y établir de manifeste.`,
+      );
+    }
+
+    // ── Étape de la route, déduite et non déclarée ──
+    //
+    // 'A' au départ, puis 'B', 'C'… dans l'ordre des escales. La valeur vient
+    // de la position réelle de la base sur la route, jamais du client : la
+    // laisser déclarer permettrait à deux chefs d'escale de revendiquer la même
+    // étape, ou d'en inventer une qui n'existe pas sur ce vol.
+    const etape_vol = estDepart ? 'A' : String.fromCharCode(65 + (escale?.ordre ?? 0));
+
+    // Un seul manifeste par point d'embarquement : le doublon serait invisible
+    // à la lecture (même base_id) et produirait deux circuits concurrents.
+    const existant = await this.prisma.manifeste.findFirst({
+      where: { vol_id: data.vol_id, base_id: data.base_id, statut: { not: StatutManifeste.REJETE } },
+      select: { id: true },
+    });
+    if (existant) {
+      throw new BadRequestException(
+        `Un manifeste existe déjà pour votre base sur le vol ${vol.numero_mission}.`,
+      );
     }
 
     return this.prisma.manifeste.create({
@@ -36,7 +83,7 @@ export class ManifesteService {
         vol_id:              data.vol_id,
         base_id:             data.base_id,
         cree_par:            data.cree_par,
-        etape_vol:           data.etape_vol ?? 'A',
+        etape_vol:           etape_vol,
         manifeste_maitre_id: data.manifeste_maitre_id ?? null,
         statut:              StatutManifeste.BROUILLON,
         flag_sensible:       vol.flag_sensible,

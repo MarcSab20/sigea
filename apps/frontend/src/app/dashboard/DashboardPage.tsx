@@ -113,9 +113,6 @@ export default function DashboardPage(): React.ReactElement {
         ))}
       </div>
 
-      {/* Grille principale */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 16, marginBottom: 16 }}>
-
         {/* Manifestes */}
         <Card>
           <div style={{ padding: '16px 20px', borderBottom: `1px solid ${T.border}`,
@@ -232,91 +229,12 @@ export default function DashboardPage(): React.ReactElement {
           )}
         </Card>
 
-        {/* Panneau droit */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {/* Actions rapides */}
-          <Card style={{ padding: '16px 20px' }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: T.text, marginBottom: 12 }}>
-              Actions rapides
-            </div>
-            {[
-              { label: 'Nouveau manifeste',    color: T.green,   path: '/manifestes/nouveau' },
-              { label: 'Tous les manifestes',  color: T.blue,    path: '/manifestes' },
-              { label: 'Planifier un vol',     color: T.textSub, path: '/vols/nouveau' },
-              { label: 'Circuit de validation',color: T.amber,   path: '/validations' },
-            ].map((btn, i) => (
-              <button key={i} onClick={() => navigate(btn.path)} style={{
-                width: '100%', padding: '10px 14px', marginBottom: 8,
-                background: `${btn.color}12`,
-                border: `1px solid ${btn.color}40`, borderRadius: 6,
-                color: btn.color, fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                textAlign: 'left', transition: 'all 0.15s' }}>
-                {btn.label}
-              </button>
-            ))}
-          </Card>
-
-          {/* État système */}
-          <Card style={{ padding: '16px 20px' }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: T.text, marginBottom: 12 }}>
-              État Système
-            </div>
-            {[
-              { svc: 'Gateway API',       ok: !error },
-              { svc: 'Auth Service',      ok: true   },
-              { svc: 'Manifeste Service', ok: !error },
-              { svc: 'Base de données',   ok: !error },
-              { svc: 'Notification WS',   ok: false  },
-            ].map((s, i) => (
-              <div key={i} style={{ display: 'flex', justifyContent: 'space-between',
-                alignItems: 'center', padding: '6px 0',
-                borderBottom: i < 4 ? `1px solid ${T.border}` : 'none' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ width: 7, height: 7, borderRadius: '50%',
-                    background: s.ok ? T.green : T.red,
-                    animation: s.ok ? 'pulse 3s infinite' : 'none' }} />
-                  <span style={{ fontSize: 12, color: T.textSub }}>{s.svc}</span>
-                </div>
-                <span style={{ fontSize: 11, fontWeight: 600,
-                  color: s.ok ? T.green : T.red }}>
-                  {s.ok ? 'OK' : 'ERR'}
-                </span>
-              </div>
-            ))}
-          </Card>
-
-          {/* Session */}
-          <Card style={{ padding: '14px 18px', background: T.greenBg,
-            border: `1px solid ${T.greenBorder}` }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: T.green,
-              textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
-              ● Session Active
-            </div>
-            <div style={{ fontSize: 12, color: T.textSub }}>
-              <div>Rôle : <strong>{user?.role?.replace('_', ' ')}</strong></div>
-              <div style={{ marginTop: 4 }}>Base : <strong>{user?.base_id}</strong></div>
-            </div>
-          </Card>
-        </div>
-      </div>
-
       {/* ── CARTE CAMEROUN ────────────────────────────────────────────────── */}
       <Card style={{ padding: '20px 24px' }}>
         <CameroonMap />
       </Card>
 
-      {/* Note IoT */}
-      <div style={{ marginTop: 12, padding: '10px 16px', background: T.blueBg,
-        border: `1px solid ${T.blueBorder}`, borderRadius: 6,
-        display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-        <span style={{ fontSize: 16 }}>ℹ</span>
-        <div style={{ fontSize: 11, color: T.blue, lineHeight: 1.6 }}>
-          <strong>Capteurs IoT recommandés :</strong> GPS/GNSS u-blox NEO-M9N · Baromètre BMP388 ·
-          IMU MPU-9250 · Thermomètre DS18B20 · ADS-B transpondeur · Débitmètre carburant.
-          Transmission : 4G/LTE + VHF data link fallback. Protocole bord : CAN Bus → ESP32/STM32.
-          Fréquence : 1 point/sec en vol. Chiffrement AES-256 par aéronef.
-        </div>
-      </div>
+      
     </div>
   );
 }

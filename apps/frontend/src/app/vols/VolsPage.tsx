@@ -5,15 +5,16 @@ import { volApi, Vol } from '@/services/manifeste.service';
 import { T } from '@/lib/theme';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
+import { useAuthStore } from '@/stores/auth.store';
 
 const BASES_FAC = [
   { id: 'BA101', code: 'BA 101', nom: 'Yaoundé',    region: 'Centre' },
-  { id: 'BA102', code: 'BA 102', nom: 'Douala',     region: 'Littoral' },
-  { id: 'BA201', code: 'BA 201', nom: 'Garoua',     region: 'Nord' },
-  { id: 'BA301', code: 'BA 301', nom: 'Maroua',     region: 'Extrême-Nord' },
+  { id: 'BA201', code: 'BA 201', nom: 'Douala',     region: 'Littoral' },
+  { id: 'BA301', code: 'BA 301', nom: 'Garoua',     region: 'Nord' },
+  { id: 'BA401', code: 'BA 401', nom: 'Maroua',     region: 'Extrême-Nord' },
   { id: 'BA302', code: 'BA 302', nom: 'Ngaoundéré', region: 'Adamaoua' },
-  { id: 'BA401', code: 'BA 401', nom: 'Bafoussam',  region: 'Ouest' },
-  { id: 'BA501', code: 'BA 501', nom: 'Bertoua',    region: 'Est' },
+  { id: 'BA501', code: 'BA 501', nom: 'Bamenda',  region: 'Nord-Ouest' },
+  { id: 'BA102', code: 'BA 102', nom: 'Bertoua',    region: 'Est' },
 ];
 
 const AERONEFS_FAC = [
@@ -227,32 +228,39 @@ function NouveauVolPage(): React.ReactElement {
 
   const [form, setForm] = useState({
     numero_mission: '', immatriculation: '', date_heure: '',
-    base_depart_id: '', base_arrivee_id: '', type_mission: '',
+    base_arrivee_id: '', type_mission: '',
     capacite_places: '', capacite_cargo_kg: '',
     combord_grade: '', combord_nom: '', combord_prenom: '',
   });
 
   const set = (k: string) => (v: string): void => setForm(f => ({ ...f, [k]: v }));
 
+  // Base de départ = affectation du planificateur. Le backend l'impose ;
+  // le formulaire ne fait que la refléter.
+  const user = useAuthStore(st => st.user);
+  const baseDepartId = user?.base_id ?? '';
+  const baseDepart = BASES_FAC.find(b => b.id === baseDepartId);
+
+  /**
+   * Changement d'aéronef.
+   *
+   * Les capacités ne sont plus préremplies ni verrouillées : le planificateur
+   * les saisit. La fiche du référentiel donne une capacité de CATALOGUE, qui
+   * n'est pas l'emport réel d'une mission — configuration cabine, carburant
+   * emporté, terrain d'escale et température jouent tous dessus. Préremplir
+   * puis verrouiller donnait une apparence de rigueur en imposant une valeur
+   * souvent fausse. Elle reste affichée à titre indicatif.
+   */
   const handleAeronefChange = (immat: string): void => {
-    const a = AERONEFS_FAC.find(x => x.immat === immat);
-    setForm(f => ({
-      ...f, immatriculation: immat,
-      capacite_places:   a ? String(a.places) : '',
-      capacite_cargo_kg: a ? String(a.cargo)  : '',
-    }));
-    // Réinitialiser les escales avec la nouvelle capacité
+    setForm(f => ({ ...f, immatriculation: immat }));
     setEscales([]);
   };
 
   const aeronef = AERONEFS_FAC.find(a => a.immat === form.immatriculation);
 
   const addEscale = (): void => {
-    setEscales(prev => [...prev, {
-      base_id: '',
-      capacite_places: aeronef?.places ?? 0,
-      capacite_cargo_kg: aeronef?.cargo ?? 0,
-    }]);
+    // Capacités d'escale à zéro : à saisir, comme celles du vol.
+    setEscales(prev => [...prev, { base_id: '', capacite_places: 0, capacite_cargo_kg: 0 }]);
   };
 
   const removeEscale = (i: number): void =>
@@ -263,19 +271,19 @@ function NouveauVolPage(): React.ReactElement {
 
   // Bases disponibles pour escales (pas départ ni arrivée)
   const basesEscales = BASES_FAC.filter(b =>
-    b.id !== form.base_depart_id && b.id !== form.base_arrivee_id &&
+    b.id !== baseDepartId && b.id !== form.base_arrivee_id &&
     !escales.find(e => e.base_id === b.id)
   );
 
   const isValid = form.numero_mission && form.immatriculation && form.date_heure &&
-    form.base_depart_id && form.base_arrivee_id && form.type_mission &&
+    baseDepartId && form.base_arrivee_id && form.type_mission &&
     form.combord_grade && form.combord_nom && form.combord_prenom &&
     escales.every(e => e.base_id);
 
   const handleSubmit = async (): Promise<void> => {
     if (!isValid) { toast.error('Remplissez tous les champs obligatoires'); return; }
-    if (form.base_depart_id === form.base_arrivee_id) {
-      toast.error('Base de départ et d\'arrivée différentes requises'); return;
+    if (baseDepartId === form.base_arrivee_id) {
+      toast.error('La base d\'arrivée ne peut pas être votre base de départ'); return;
     }
     setSubmitting(true);
     try {
@@ -344,14 +352,27 @@ function NouveauVolPage(): React.ReactElement {
           <Card style={{ padding: '22px 26px' }}>
             <SectionTitle title="Trajet" />
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 40px 1fr', gap: '0 12px', alignItems: 'end' }}>
-              <Field label="Base de départ" value={form.base_depart_id}
-                onChange={set('base_depart_id')} required
-                options={BASES_FAC.map(b => ({ value: b.id, label: `${b.code} — ${b.nom}` }))} />
+              {/* Base de départ : imposée par l'affectation du planificateur.
+                  Affichée en lecture seule plutôt que masquée — le trajet doit
+                  rester lisible d'un coup d'œil. Le backend l'impose de toute
+                  façon et ignore ce que le formulaire enverrait. */}
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ display: 'block', fontSize: 11, fontWeight: 600,
+                  color: T.textSub, marginBottom: 5 }}>Base de départ</label>
+                <div style={{ padding: '9px 12px', background: T.bgAlt,
+                  border: `1px solid ${T.border}`, borderRadius: 6, fontSize: 13,
+                  color: T.text, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontFamily: T.mono, fontWeight: 600 }}>{baseDepart?.code ?? '—'}</span>
+                  <span style={{ color: T.textDim, fontSize: 12 }}>{baseDepart?.nom ?? 'Base d\'affectation inconnue'}</span>
+                  <span style={{ marginLeft: 'auto', fontSize: 10, color: T.textDim,
+                    textTransform: 'uppercase', letterSpacing: '0.06em' }}>Votre base</span>
+                </div>
+              </div>
               <div style={{ marginBottom: 14, textAlign: 'center', fontSize: 20,
                 color: T.textDim, paddingTop: 20 }}>→</div>
               <Field label="Base d'arrivée" value={form.base_arrivee_id}
                 onChange={set('base_arrivee_id')} required
-                options={BASES_FAC.filter(b => b.id !== form.base_depart_id)
+                options={BASES_FAC.filter(b => b.id !== baseDepartId)
                   .map(b => ({ value: b.id, label: `${b.code} — ${b.nom}` }))} />
             </div>
 
@@ -451,12 +472,10 @@ function NouveauVolPage(): React.ReactElement {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 20px' }}>
               <Field label="Capacité PAX totale" value={form.capacite_places}
                 onChange={set('capacite_places')} type="number" required
-                disabled={!!aeronef}
-                hint={aeronef ? `Standard ${aeronef.type}` : ''} />
+                hint={aeronef ? `Catalogue ${aeronef.type} : ${aeronef.places} places` : ''} />
               <Field label="Capacité cargo totale (kg)" value={form.capacite_cargo_kg}
                 onChange={set('capacite_cargo_kg')} type="number" required
-                disabled={!!aeronef}
-                hint={aeronef ? `Standard ${aeronef.type}` : ''} />
+                hint={aeronef ? `Catalogue ${aeronef.type} : ${aeronef.cargo.toLocaleString()} kg` : ''} />
             </div>
           </Card>
 
@@ -518,14 +537,14 @@ function NouveauVolPage(): React.ReactElement {
           )}
 
           {/* Synthèse trajet */}
-          {(form.base_depart_id || form.base_arrivee_id || escales.length > 0) && (
+          {(baseDepartId || form.base_arrivee_id || escales.length > 0) && (
             <Card style={{ padding: '16px 18px' }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: T.textSub,
                 textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 12 }}>
                 Itinéraire
               </div>
               {[
-                form.base_depart_id && BASES_FAC.find(b => b.id === form.base_depart_id),
+                baseDepartId && BASES_FAC.find(b => b.id === baseDepartId),
                 ...escales.map(e => BASES_FAC.find(b => b.id === e.base_id)),
                 form.base_arrivee_id && BASES_FAC.find(b => b.id === form.base_arrivee_id),
               ].filter(Boolean).map((b, i, arr) => (
