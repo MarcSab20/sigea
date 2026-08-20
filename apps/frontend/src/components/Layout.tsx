@@ -4,6 +4,7 @@ import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuthStore } from '@/stores/auth.store';
 import { authApi } from '@/services/auth.service';
 import { T } from '@/lib/theme';
+import BandeauHorsLigne from './BandeauHorsLigne';
 
 const NAV_ITEMS = [
   { path: '/',             label: 'Tableau de Bord', icon: '⊞' },
@@ -171,6 +172,8 @@ export default function Layout({ children }: { children: React.ReactNode }): Rea
             </div>
           </div>
         </header>
+
+        <BandeauHorsLigne />
 
         <main style={{ flex: 1, padding: '24px', overflowY: 'auto',
           animation: 'fadeIn 0.25s ease forwards' }}>

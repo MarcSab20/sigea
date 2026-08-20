@@ -2,7 +2,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams, Routes, Route, useSearchParams } from 'react-router-dom';
 import { useAuthStore } from '@/stores/auth.store';
-import { manifesteApi, volApi, Manifeste, Vol, Passager, Materiel, CreateManifesteDto } from '@/services/manifeste.service';
+import { manifesteApi, volApi, Manifeste, Vol, Passager, Materiel, CreateManifesteDto,
+  ActionEnLigneRequise } from '@/services/manifeste.service';
+import { estIdentifiantLocal, estEnLigne } from '@/offline/outbox';
 import { T } from '@/lib/theme';
 import { toast } from 'sonner';
 import ManifestePrint from '@/components/ManifestePrint';
@@ -53,6 +55,22 @@ function Field({ label, value, onChange, type='text', required, options, placeho
 const CATEGORIES = ['TROUPES','TROUPES_PARA','CHEF_MIL','MISSION','PERMISSION','EVASAN','VIP','CIVIL','OP_SENSIBLE'];
 const TYPES_LOG = ['AA','IA','INTERMINISTERIEL','INDIVIDUEL','SENSIBLE_CEMAA'];
 
+/**
+ * Message d'erreur lisible.
+ *
+ * Distingue trois cas que l'opérateur ne doit pas confondre : une action
+ * impossible hors ligne (inutile de réessayer), un refus du serveur (corriger
+ * la saisie), et une panne réseau (réessayer plus tard). Un « Erreur »
+ * générique ferait réessayer indéfiniment dans le premier cas.
+ */
+const messageErreur = (e: unknown): string => {
+  if (e instanceof ActionEnLigneRequise) return e.message;
+  const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message;
+  if (msg) return msg;
+  if (!estEnLigne()) return 'Réseau indisponible — action reportée ou impossible hors ligne.';
+  return (e as Error)?.message ?? 'Erreur';
+};
+
 const statusColor = (s: string): string =>
   s==='VALIDE'?T.green:s==='REJETE'?T.red:s==='SOUMIS'?T.amberLight:s==='EN_VALIDATION'?T.blue:T.textDim;
 
@@ -101,8 +119,11 @@ function ManifestesListPage(): React.ReactElement {
                   style={{ display: 'grid', gridTemplateColumns: '90px 1fr 120px 130px 50px 60px 130px',
                     padding: '13px 20px', borderBottom: `1px solid ${T.border}`,
                     alignItems: 'center', transition: 'background 0.1s' }}>
-                  <span style={{ fontSize: 11, fontFamily: T.mono, color: T.green, fontWeight: 500 }}>
-                    #{m.id.slice(0,6).toUpperCase()}
+                  <span style={{ fontSize: 11, fontFamily: T.mono,
+                    color: estIdentifiantLocal(m.id) ? T.amber : T.green, fontWeight: 500 }}
+                    title={estIdentifiantLocal(m.id)
+                      ? 'Saisi hors ligne — pas encore transmis au serveur' : undefined}>
+                    {estIdentifiantLocal(m.id) ? '⇡ LOCAL' : `#${m.id.slice(0,6).toUpperCase()}`}
                   </span>
                   <div>
                     <span style={{ fontSize: 13, fontWeight: 500, color: T.text }}>
@@ -163,11 +184,14 @@ function NouveauManifestePage(): React.ReactElement {
     setSubmitting(true);
     try {
       const m = await manifesteApi.create({ vol_id: volId, etape_vol: etapeVol });
-      toast.success('Manifeste créé');
+      toast.success(
+        estIdentifiantLocal(m.id)
+          ? 'Manifeste créé hors ligne — il sera transmis au retour du réseau'
+          : 'Manifeste créé',
+      );
       navigate(`/manifestes/${m.id}/edit`);
     } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      toast.error(msg ?? 'Erreur de création');
+      toast.error(messageErreur(e));
     } finally { setSubmitting(false); }
   };
 
@@ -279,13 +303,15 @@ function SaisieManifestePage(): React.ReactElement {
     setSavingPax(true);
     try {
       await manifesteApi.addPassager(id, pax);
-      toast.success(`${pax.nom} ${pax.prenom} ajouté`);
+      toast.success(
+        `${pax.nom} ${pax.prenom} ajouté${estEnLigne() && !estIdentifiantLocal(id ?? '') ? '' : ' (en attente de transmission)'}`,
+      );
       await refresh();
       setPax({ nom:'', prenom:'', grade:'', categorie:'TROUPES', matricule:'', unite:'',
         destination:'', nb_bagages:0, masse_bagages_kg:0, couleur_bagages:'',
         contact_urgence_nom:'', contact_urgence_tel:'', contact_urgence_qual:'', ref_autorisation:'' });
     } catch (e: unknown) {
-      toast.error((e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Erreur');
+      toast.error(messageErreur(e));
     } finally { setSavingPax(false); }
   };
 
@@ -296,24 +322,39 @@ function SaisieManifestePage(): React.ReactElement {
     setSavingMat(true);
     try {
       await manifesteApi.addMateriel(id, mat);
-      toast.success(`"${mat.designation}" ajouté`);
+      toast.success(
+        `"${mat.designation}" ajouté${estEnLigne() && !estIdentifiantLocal(id ?? '') ? '' : ' (en attente de transmission)'}`,
+      );
       await refresh();
       setMat({ designation:'', type_mission_log:'AA', proprietaire:'', poids_kg:0,
         volume:0, destination:'', expediteur_nom:'', expediteur_fonction:'', expediteur_tel:'' });
     } catch (e: unknown) {
-      toast.error((e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Erreur');
+      toast.error(messageErreur(e));
     } finally { setSavingMat(false); }
   };
 
   const handleSoumettre = async (): Promise<void> => {
     if (!id) return;
+
+    // Garde en amont, pour un message immédiat et sans appel réseau. La couche
+    // service refuse également : ce contrôle est ergonomique, pas la sécurité.
+    if (!estEnLigne() || estIdentifiantLocal(id)) {
+      toast.error(
+        estIdentifiantLocal(id)
+          ? "Ce manifeste n'a pas encore été transmis au serveur. Rétablir le réseau, " +
+            'attendre la transmission, puis soumettre.'
+          : 'La soumission engage le circuit de validation : elle exige une connexion.',
+      );
+      return;
+    }
+
     setSubmitting(true);
     try {
       await manifesteApi.soumettre(id);
       toast.success('Manifeste soumis au circuit de validation');
       navigate(`/manifestes/${id}`);
     } catch (e: unknown) {
-      toast.error((e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Erreur');
+      toast.error(messageErreur(e));
     } finally { setSubmitting(false); }
   };
 
@@ -349,7 +390,11 @@ function SaisieManifestePage(): React.ReactElement {
             🖨 Imprimer
           </button>
           {!readOnly && (
-            <button onClick={handleSoumettre} disabled={submitting} style={{
+            <button onClick={handleSoumettre}
+              disabled={submitting || !estEnLigne() || estIdentifiantLocal(id ?? '')}
+              title={!estEnLigne() || estIdentifiantLocal(id ?? '')
+                ? 'Soumission indisponible hors ligne' : undefined}
+              style={{
               padding: '8px 20px', background: T.green, border: 'none', borderRadius: 6,
               color: '#fff', fontSize: 13, fontWeight: 600, cursor: submitting ? 'not-allowed' : 'pointer' }}>
               {submitting ? 'Soumission…' : 'Soumettre ↗'}
@@ -539,7 +584,7 @@ function SaisieManifestePage(): React.ReactElement {
             <div style={{ fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 16 }}>
               Circuit de validation
             </div>
-            {['COMESO','COMGMO','COMBASE','COMBORD'].map((etape, i) => {
+            {['COMESO','COMGMO','COMBORD','COMBASE'].map((etape, i) => {
               const v = manifeste.validations?.find(x => x.etape === etape);
               const col = !v ? T.textMute : v.statut === 'APPROUVE' ? T.green : v.statut === 'REJETE' ? T.red : T.amberLight;
               return (
@@ -560,7 +605,11 @@ function SaisieManifestePage(): React.ReactElement {
               );
             })}
             {!readOnly && (
-              <button onClick={handleSoumettre} disabled={submitting} style={{
+              <button onClick={handleSoumettre}
+              disabled={submitting || !estEnLigne() || estIdentifiantLocal(id ?? '')}
+              title={!estEnLigne() || estIdentifiantLocal(id ?? '')
+                ? 'Soumission indisponible hors ligne' : undefined}
+              style={{
                 width: '100%', marginTop: 16, padding: '10px', background: T.green,
                 border: 'none', borderRadius: 6, color: '#fff', fontSize: 13,
                 fontWeight: 600, cursor: submitting ? 'not-allowed' : 'pointer' }}>
