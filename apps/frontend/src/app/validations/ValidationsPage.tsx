@@ -15,7 +15,7 @@ function Card({ children, style={} }: { children: React.ReactNode; style?: React
   );
 }
 
-const ETAPE_ORDER = ['COMESO', 'COMGMO', 'CEMAA_SENSIBLE', 'COMBASE', 'COMBORD'];
+const ETAPE_ORDER = ['COMESO', 'COMGMO', 'COMBORD', 'CEMAA_SENSIBLE', 'COMBASE'];
 const ETAPE_ROLE: Record<string, string> = {
   COMESO: 'comeso', COMGMO: 'comgmo', COMBORD: 'combord',
   CEMAA_SENSIBLE: 'cemaa', COMBASE: 'combase',
@@ -91,16 +91,28 @@ export default function ValidationsPage(): React.ReactElement {
     }
     setProcessing(true);
     try {
+      // `role` n'est PAS transmis : le backend le lit exclusivement dans le JWT.
+      // L'envoyer déclenche un 400 « property role should not exist », le
+      // validation-service étant en forbidNonWhitelisted. Le champ avait été
+      // retiré du DTO côté serveur parce qu'un rôle fourni par le client
+      // permettait de signer à la place d'un autre validateur.
+      //
+      // Sur un rejet, le motif part dans `motif` : la state machine l'exige et
+      // le contrôle porte sur ce champ, `commentaire` ne servant qu'à
+      // l'observation libre accompagnant une approbation.
       await api.post(`/validations/${manifeste.id}`, {
-        statut, commentaire: motif, role: user?.role,
+        statut,
+        ...(statut === 'REJETE' ? { motif } : { commentaire: motif }),
       });
       toast.success(statut === 'APPROUVE' ? 'Validation enregistrée' : 'Rejet enregistré');
       setSelected(null);
       setMotif('');
       fetchData();
     } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      toast.error(msg ?? 'Erreur de validation');
+      // Le ValidationPipe renvoie un TABLEAU de messages ; l'afficher tel quel
+      // donnait « [object Object] » à l'utilisateur.
+      const msg = (e as { response?: { data?: { message?: string | string[] } } })?.response?.data?.message;
+      toast.error(Array.isArray(msg) ? msg.join(' · ') : (msg ?? 'Erreur de validation'));
     } finally { setProcessing(false); }
   };
 
