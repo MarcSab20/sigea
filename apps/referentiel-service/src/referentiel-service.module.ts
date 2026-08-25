@@ -7,7 +7,9 @@ import { BasesModule } from './bases/bases.module';
 import { AeronefsModule } from './aeronefs/aeronefs.module';
 import { PersonnelsModule } from './personnels/personnels.module';
 import { UnitesModule } from './unites/unites.module';
+import { EscadronsModule } from './escadrons/escadrons.module';
 import { AdminModule } from './admin/admin.module';
+import { InterimModule } from './interim/interim.module';
 import { HealthModule } from './health/health.module';
 import { JwtStrategy } from './strategies/jwt.strategy';
 
@@ -26,7 +28,11 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     AeronefsModule,
     PersonnelsModule,
     UnitesModule,
+    // Nouveau : référentiel des escadrons (lecture ouverte, écriture ADMIN).
+    EscadronsModule,
     AdminModule,
+    // Nouveau : gestionnaire d'intérim et de mouvements, monté sous /admin.
+    InterimModule,
     HealthModule,
   ],
   providers: [JwtStrategy],

@@ -1,12 +1,29 @@
 export enum RoleUtilisateur {
   CHEF_ESCALE = 'chef_escale',
+  COMEA       = 'comea',
   COMESO      = 'comeso',
   COMGMO      = 'comgmo',
   COMBORD     = 'combord',
   COMBASE     = 'combase',
   CEMAA       = 'cemaa',
+  MAGE        = 'mage',
   ADMIN       = 'admin',
 }
+
+export const ROLES_CREATION_VOL: readonly RoleUtilisateur[] = [
+  RoleUtilisateur.ADMIN,
+  RoleUtilisateur.COMEA,
+  RoleUtilisateur.COMGMO,
+] as const;
+
+export const ROLES_AUTORITE_CENTRALE: readonly RoleUtilisateur[] = [
+  RoleUtilisateur.CEMAA,
+  RoleUtilisateur.MAGE,
+] as const;
+
+export const ROLES_AVEC_ESCADRON: readonly RoleUtilisateur[] = [
+  RoleUtilisateur.COMEA,
+] as const;
 
 export enum StatutManifeste {
   BROUILLON     = 'BROUILLON',
@@ -25,7 +42,6 @@ export enum EtapeValidation {
   COMBASE        = 'COMBASE',
 }
 
-/// Mention portée par le tampon circulaire apposé sur le manifeste.
 export enum MentionSignature {
   VU     = 'VU',
   ACCORD = 'ACCORD',
@@ -42,6 +58,13 @@ export enum StatutValidation {
   EN_ATTENTE = 'EN_ATTENTE',
   APPROUVE   = 'APPROUVE',
   REJETE     = 'REJETE',
+}
+
+export enum TypeMouvement {
+  MUTATION      = 'MUTATION',
+  DEPART        = 'DEPART',
+  SUSPENSION    = 'SUSPENSION',
+  REINTEGRATION = 'REINTEGRATION',
 }
 
 export enum CategoriePassager {

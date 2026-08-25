@@ -62,6 +62,7 @@ export interface ManifesteRenderData {
     qr_data_uri: string;
     /** URL encodée dans le QR, affichée en clair sous le cartouche. */
     url: string;
+    numero_controle?: string | null;
   } | null;
 }
 
@@ -233,7 +234,14 @@ function cartoucheAuthenticite(data: ManifesteRenderData): string {
       <div class="auth-t">Vérification d'authenticité</div>
       <div class="auth-d">Scanner le code, ou saisir l'empreinte sur&nbsp;:<br/>
         <span class="auth-url">${esc(a.url.split('?')[0])}</span></div>
-      <div class="auth-h">Empreinte SHA-256 : <b>${esc(a.hash_court)}</b></div>
+            <div class="auth-h">Empreinte SHA-256 : <b>${esc(a.hash_court)}</b></div>
+      ${a.numero_controle ? `
+      <div class="auth-n">
+        <span class="auth-n-l">N° de contrôle</span>
+        <span class="auth-n-v">${esc(a.numero_controle)}</span>
+      </div>
+      <div class="auth-w">Ce numéro doit être identique à celui affiché après
+        lecture du code. Toute divergence rend le tirage irrecevable.</div>` : ''}
       <div class="auth-d">Figée à l'étape ${esc(a.etape)} le ${esc(fmtDate(a.date))}</div>
     </div>
   </div>`;
@@ -335,6 +343,11 @@ export function renderManifesteHtml(
   .auth-url { font-family: 'Consolas', monospace; color: #123a8f; }
   .auth-h { font-size: 9px; margin-top: 3px; font-family: 'Consolas', monospace;
     letter-spacing: 0.08em; color: #1a1a1a; }
+  .auth-n   { margin-top: 5px; display: flex; align-items: baseline; gap: 8px; }
+  .auth-n-l { font-size: 8px; text-transform: uppercase; letter-spacing: 1px; color: #5b6472; }
+  .auth-n-v { font-family: Consolas, 'Courier New', monospace; font-size: 13px;
+              font-weight: 700; letter-spacing: 1.6px; color: #123a8f; }
+  .auth-w   { margin-top: 3px; font-size: 7px; line-height: 1.4; color: #7a0016; }
 </style>
 </head>
 <body>

@@ -7,13 +7,16 @@ import { T } from '@/lib/theme';
 import BandeauHorsLigne from './BandeauHorsLigne';
 
 const NAV_ITEMS = [
-  { path: '/',             label: 'Tableau de Bord', icon: '⊞' },
-  { path: '/manifestes',  label: 'Manifestes',       icon: '📋' },
-  { path: '/vols',        label: 'Vols',             icon: '✈'  },
-  { path: '/validations', label: 'Validations',      icon: '✓'  },
-  { path: '/cemaa',       label: 'Espace CEMAA',     icon: '⬡'  },
-  { path: '/admin',       label: 'Administration',   icon: '⚙'  },
-  { path: '/profile', label: 'Mon profil', icon: '👤' },
+  { path: '/',            label: 'Tableau de Bord', icon: '⊞'                          },
+  { path: '/manifestes',  label: 'Manifestes',      icon: '📋', roles: ['chef_escale'] },
+  { path: '/vols',        label: 'Vols',            icon: '✈' , roles:['comea', 'comgmo']                         },
+  { path: '/validations', label: 'Validations',     icon: '✓'                          },
+  { path: '/cemaa',       label: 'Espace CEMAA',    icon: '⬡',  roles: ['cemaa']       },
+  { path: '/mage',        label: 'Espace MAGE',     icon: '◇',  roles: ['mage']        },
+  { path: '/exploitation', label: 'Exploitation',    icon: '📊', roles: ['admin', 'combase', 'comgmo', 'comea', 'comeso', 'cemaa', 'mage']           },
+  { path: '/archives',     label: 'Archivé',         icon: '🗄'                          },
+  { path: '/admin',       label: 'Administration',  icon: '⚙',  roles: ['admin']       },
+  { path: '/profile',     label: 'Mon profil',      icon: '👤'                         },
 ];
 
 export default function Layout({ children }: { children: React.ReactNode }): React.ReactElement {
@@ -57,6 +60,11 @@ export default function Layout({ children }: { children: React.ReactNode }): Rea
         .nav-item.cemaa:hover { background: ${T.redBg} !important; }
         .nav-item.cemaa.active { background: ${T.redBg} !important;
           border-left-color: ${T.red} !important; color: ${T.red} !important; }
+        /* Ambre : les deux espaces d'autorité doivent se distinguer au premier
+           coup d'œil, y compris dans le menu. */
+        .nav-item.mage:hover { background: ${T.amberBg} !important; }
+        .nav-item.mage.active { background: ${T.amberBg} !important;
+          border-left-color: ${T.amber} !important; color: ${T.amber} !important; }
         button:hover:not(:disabled) { filter: brightness(0.93); }
         .row-hover:hover { background: ${T.bgAlt} !important; cursor: pointer; }
       `}</style>
@@ -87,24 +95,28 @@ export default function Layout({ children }: { children: React.ReactNode }): Rea
 
         {/* Navigation */}
         <nav style={{ flex: 1, padding: '8px 0', overflowY: 'auto' }}>
-          {NAV_ITEMS.map(item => {
+          {NAV_ITEMS.filter(item => !item.roles || item.roles.includes(user?.role ?? '')).map(item => {
             const isActive = item.path === '/'
               ? location.pathname === '/'
               : location.pathname.startsWith(item.path);
-            const isCemaa = item.path === '/cemaa';
+            const isCemaa  = item.path === '/cemaa';
+            const isMage   = item.path === '/mage';
+            const special  = isCemaa || isMage;
+            const accent   = isMage ? T.amber   : T.red;
+            const accentBg = isMage ? T.amberBg : T.redBg;
             return (
               <Link key={item.path} to={item.path}
-                className={`nav-item${isCemaa ? ' cemaa' : ''}${isActive ? ' active' : ''}`}
+                className={`nav-item${isCemaa ? ' cemaa' : isMage ? ' mage' : ''}${isActive ? ' active' : ''}`}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 10,
                   padding: collapsed ? '11px 14px' : '11px 18px',
-                  color: isActive ? (isCemaa ? T.red : T.green) : T.textSub,
+                  color: isActive ? (special ? accent : T.green) : T.textSub,
                   fontSize: 13, fontWeight: isActive ? 600 : 400,
-                  background: isActive ? (isCemaa ? T.redBg : T.greenBg) : 'transparent',
+                  background: isActive ? (special ? accentBg : T.greenBg) : 'transparent',
                   cursor: 'pointer', letterSpacing: '0.01em',
                 }}>
                 <span style={{ fontSize: 15, flexShrink: 0, width: 20, textAlign: 'center',
-                  color: isCemaa && isActive ? T.red : 'inherit' }}>
+                  color: special && isActive ? accent : 'inherit'
                   {item.icon}
                 </span>
                 {!collapsed && <span>{item.label}</span>}
@@ -172,7 +184,7 @@ export default function Layout({ children }: { children: React.ReactNode }): Rea
             </div>
           </div>
         </header>
-
+        
         <BandeauHorsLigne />
 
         <main style={{ flex: 1, padding: '24px', overflowY: 'auto',

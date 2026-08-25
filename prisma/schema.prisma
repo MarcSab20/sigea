@@ -15,11 +15,15 @@ datasource db {
 
 enum RoleUtilisateur {
   chef_escale
+  /// Commandant des escadrons aeriens. Cree les vols, hors circuit de validation.
+  comea
   comeso
   comgmo
   combord
   combase
   cemaa
+  /// Major General de l'Armee de l'Air. Autorite centrale, espace propre.
+  mage
   admin
 }
 
@@ -40,6 +44,7 @@ enum EtapeValidation {
   COMGMO
   COMBORD
   CEMAA_SENSIBLE
+  MAGE_SENSIBLE
   COMBASE
 }
 
@@ -93,7 +98,14 @@ enum TypeConsigne {
 enum OrigineEnregistrement {
   SAISIE
   CEMAA
+  MAGE
 }
+
+enum AutoriteCentrale {
+  CEMAA
+  MAGE
+}
+
 
 enum TypeMissionLogistique {
   AA
@@ -128,6 +140,7 @@ model Base {
   vols_depart    Vol[]         @relation("VolDepart")
   vols_arrivee   Vol[]         @relation("VolArrivee")
   escales        EscaleVol[]   @relation("VolEscale")
+  escadrons      Escadron[]
   notifications  Notification[]
   createdAt      DateTime      @default(now())
 }
@@ -142,6 +155,8 @@ model Utilisateur {
   role            RoleUtilisateur
   base_id         String
   base            Base              @relation(fields: [base_id], references: [id])
+  escadron_id     String?
+  escadron        Escadron?         @relation(fields: [escadron_id], references: [id])
   base_admin      Base[]            @relation("BaseAdmin")
   actif           Boolean           @default(true)
   last_login      DateTime?
@@ -164,10 +179,15 @@ model Utilisateur {
   security_notifs     SecurityNotification[]
   mfa_reset_requests  MfaResetRequest[]
   notifications       Notification[]
+  interims_titulaire  Interim[]     @relation("InterimTitulaire")
+  interims_suppleant  Interim[]     @relation("InterimSuppleant")
+  mouvements          MouvementPersonnel[] @relation("MouvementConcerne")
+  successions         MouvementPersonnel[] @relation("MouvementSuccesseur")
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
   @@index([base_id, role])
+  @@index([escadron_id])
 }
 
 model OtpSecret {
@@ -234,13 +254,9 @@ model Vol {
   flag_sensible     Boolean       @default(false)
   capacite_places   Int
   capacite_cargo_kg Decimal       @db.Decimal(10, 2)
-
-  /// Commandant de bord — figé sur le vol.
-  /// Alimente le tampon COMBORD (nom + immatriculation) à l'impression.
   combord_grade     String
   combord_nom       String
   combord_prenom    String
-
   statut            StatutVol     @default(PLANIFIE)
   escales           EscaleVol[]
   manifestes        Manifeste[]
@@ -250,6 +266,9 @@ model Vol {
 
   @@index([date_heure])
   @@index([statut])
+  @@index([base_depart_id, base_arrivee_id, date_heure])
+  @@index([combord_nom, combord_prenom])
+
 }
 
 /// Escale intermédiaire avec capacités propres.
@@ -281,11 +300,18 @@ model ConsigneCemaa {
   places_bloquees  Int          @default(0)
   masse_bloquee_kg Decimal      @default(0) @db.Decimal(10, 2)
   valide_par_cemaa String
+  autorite         AutoriteCentrale    @default(CEMAA)
+  statut_realisation      StatutConsigne @default(EMISE)
+  confirme_par            String?
+  confirme_le             DateTime?
+  observation_realisation String?
   date             DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
   @@index([vol_id])
   @@index([vol_id, escale_base_id])
+  @@index([autorite, vol_id])
+  @@index([vol_id, statut_realisation])
 }
 
 model Manifeste {
@@ -300,19 +326,15 @@ model Manifeste {
   etape_vol           String                  @default("A")
   version             Int                     @default(1)
   statut              StatutManifeste         @default(BROUILLON)
-  /// Prochaine étape attendue du circuit. NULL tant que BROUILLON,
-  /// et une fois le circuit terminé. Écrit exclusivement par la
-  /// state machine du validation-service.
   etape_courante      EtapeValidation?
   flag_sensible       Boolean                 @default(false)
-
-  /// Indication portée sur le document imprimé dès qu'une consigne
-  /// CEMAA a été appliquée à ce manifeste. Dénormalisé depuis
-  /// ConsigneCemaa par le consumer d'évènement, pour éviter une
-  /// jointure à chaque rendu de liste.
   consignes_cemaa_appliquees Boolean          @default(false)
   consignes_cemaa_date       DateTime?
   consignes_cemaa_nb         Int              @default(0)
+
+  consignes_mage_appliquees  Boolean   @default(false)
+  consignes_mage_date        DateTime?
+  consignes_mage_nb          Int       @default(0)
 
   cree_par            String
   passagers           Passager[]
@@ -323,6 +345,7 @@ model Manifeste {
   snapshots           ManifesteSnapshot[]
   alertes             AlerteEscale[]
   compte_rendu        CompteRenduCemaa?
+  archive             ArchiveManifeste?
   createdAt           DateTime                @default(now())
   updatedAt           DateTime                @updatedAt
 
@@ -340,6 +363,7 @@ model Passager {
   grade                String?
   categorie            CategoriePassager
   matricule            String?
+  cni                  String?
   unite                String?
   destination          String
   nb_bagages           Int
@@ -356,6 +380,12 @@ model Passager {
 
   @@index([manifeste_id])
   @@index([base_id])
+  @@index([cni])
+  @@index([matricule])
+  @@index([categorie])
+  @@index([contact_urgence_tel])
+
+
 }
 
 model Materiel {
@@ -378,7 +408,27 @@ model Materiel {
   createdAt           DateTime              @default(now())
 
   @@index([manifeste_id])
+  @@index([designation])
+  @@index([type_mission_log])
 }
+
+model RechercheNominative {
+  id           String   @id @default(uuid())
+  user_id      String
+  role         String
+  base_id      String
+  /// CNI, MATRICULE, NOM, TELEPHONE
+  type_critere String
+  critere      String
+  nb_resultats Int      @default(0)
+  motif        String?
+  ip           String?
+  timestamp    DateTime @default(now())
+
+  @@index([user_id, timestamp])
+  @@index([timestamp])
+}
+
 
 model MarchandiseDangereuse {
   id               String    @id @default(uuid())
@@ -432,6 +482,18 @@ model ValidationEtape {
   tampon_ligne2    String?
   signataire_nom   String?
   signataire_grade String?
+
+  // -- Interim : le signataire n'etait pas le titulaire du poste --
+  /// Vrai si l'etape a ete franchie au titre d'une delegation. Le tampon
+  /// porte alors la mention "P/I" et le nom du titulaire empeche.
+  par_interim      Boolean          @default(false)
+  /// Delegation invoquee. Conserve meme apres revocation : la piste d'audit
+  /// doit rester lisible des annees plus tard.
+  interim_id       String?
+  interim          Interim?         @relation(fields: [interim_id], references: [id])
+  /// Titulaire empeche, fige a la signature (comme le reste du tampon).
+  titulaire_nom    String?
+  titulaire_grade  String?
 
   @@unique([manifeste_id, etape], name: "manifeste_id_etape")
   @@index([manifeste_id, etape])
@@ -615,3 +677,211 @@ model ManifesteSnapshot {
   @@index([manifeste_id, createdAt])
   @@index([hash])
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Escadrons aériens
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Escadron aérien rattaché à une base. Une base porte 0..n escadrons.
+///
+/// Le rôle COMEA est le commandant d'UN escadron : c'est la raison d'être de
+/// ce modèle. La création d'un utilisateur COMEA impose donc le choix d'un
+/// escadron, et ce choix est borné aux escadrons de sa base d'affectation.
+model Escadron {
+  id           String        @id @default(uuid())
+  /// Numéro seul, tel qu'il se dit : "21", "22", "31"… Sert aux libellés et
+  /// au tampon éventuel. Unique DANS une base, pas globalement : deux bases
+  /// peuvent héberger des escadrons de numérotation voisine.
+  code         String
+  nom          String
+  /// Vocation opérationnelle : TRANSPORT, CHASSE, HELICOPTERE, ECOLE…
+  /// Chaîne libre et non enum : la nomenclature évolue par décision d'emploi,
+  /// pas par migration de schéma.
+  type         String?
+  base_id      String
+  base         Base          @relation(fields: [base_id], references: [id])
+  actif        Boolean       @default(true)
+  utilisateurs Utilisateur[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@unique([base_id, code])
+  @@index([base_id, actif])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Intérim et mouvements de personnel
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Délégation temporaire des attributions d'un poste.
+///
+/// Principe retenu : on NE MODIFIE PAS le rôle du suppléant. Il conserve le
+/// sien et reçoit, le temps de l'intérim, les attributions du rôle délégué.
+/// Un COMESO couvrant le COMGMO peut ainsi signer les deux étapes, ce qu'une
+/// simple bascule de rôle rendrait impossible.
+///
+/// Contrainte assumée : titulaire et suppléant appartiennent à la MÊME base.
+/// Le cloisonnement par base_id du jeton reste donc intact — aucune étape du
+/// circuit ne peut être franchie hors du périmètre du signataire.
+model Interim {
+  id           String          @id @default(uuid())
+
+  /// Titulaire empêché. Ses attributions sont déléguées, son compte reste actif.
+  titulaire_id String
+  titulaire    Utilisateur     @relation("InterimTitulaire", fields: [titulaire_id], references: [id])
+
+  /// Suppléant. Exerce le rôle délégué EN PLUS du sien.
+  suppleant_id String
+  suppleant    Utilisateur     @relation("InterimSuppleant", fields: [suppleant_id], references: [id])
+
+  /// Rôle effectivement délégué. Figé : si le titulaire est muté et change de
+  /// rôle, l'intérim en cours ne suit pas — il doit être révoqué explicitement.
+  role_delegue RoleUtilisateur
+  base_id      String
+  escadron_id  String?
+
+  motif        String?
+  date_debut   DateTime        @default(now())
+  /// NULL = durée indéterminée, jusqu'à révocation explicite.
+  date_fin     DateTime?
+
+  /// Drapeau de révocation. La borne temporelle (date_fin) ne suffit pas :
+  /// l'administrateur doit pouvoir couper un accès dans la seconde, sans
+  /// attendre l'échéance. L'index partiel ci-dessous s'appuie dessus.
+  actif        Boolean         @default(true)
+
+  cree_par     String
+  revoque_par  String?
+  revoque_le   DateTime?
+  motif_revocation String?
+
+  /// Signatures apposées au titre de cette délégation.
+  validations  ValidationEtape[]
+
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@index([suppleant_id, actif])
+  @@index([titulaire_id, actif])
+  @@index([base_id, actif])
+}
+
+enum TypeMouvement {
+  MUTATION
+  DEPART
+  SUSPENSION
+  REINTEGRATION
+}
+
+/// Suivi d'exécution d'une consigne d'autorité centrale.
+enum StatutConsigne {
+  /// Émise, exécution non encore confirmée. Bloque le circuit.
+  EMISE
+  /// L'autorité émettrice atteste que la consigne a été exécutée.
+  REALISEE
+  /// L'autorité constate que la consigne N'A PAS été exécutée.
+  /// Bloque le circuit jusqu'à correction du manifeste et nouvelle confirmation.
+  NON_REALISEE
+  /// Consigne retirée par son émetteur. Ne bloque plus rien.
+  ANNULEE
+}
+
+
+/// Journal des mouvements de personnel : mutation, départ, suspension.
+///
+/// Distinct d'AuditLog, qui trace les APPELS. Ici on trace une DÉCISION
+/// d'emploi : qui remplace qui, à quelle date d'effet, sur décision de qui.
+/// C'est cette table que l'on produit lorsqu'il faut justifier, deux ans plus
+/// tard, pourquoi tel compte a cessé de signer tel jour.
+model MouvementPersonnel {
+  id             String        @id @default(uuid())
+  utilisateur_id String
+  utilisateur    Utilisateur   @relation("MouvementConcerne", fields: [utilisateur_id], references: [id])
+  type           TypeMouvement
+
+  base_avant     String?
+  base_apres     String?
+  role_avant     RoleUtilisateur?
+  role_apres     RoleUtilisateur?
+  escadron_avant String?
+  escadron_apres String?
+
+  /// Successeur désigné, le cas échéant. Purement documentaire : le transfert
+  /// effectif des attributions passe par la mise à jour du compte du
+  /// successeur, pas par ce champ.
+  successeur_id  String?
+  successeur     Utilisateur?  @relation("MouvementSuccesseur", fields: [successeur_id], references: [id])
+
+  date_effet     DateTime      @default(now())
+  motif          String?
+  reference      String?
+  decide_par     String
+  createdAt      DateTime      @default(now())
+
+  @@index([utilisateur_id, date_effet])
+  @@index([type, date_effet])
+}
+
+enum StatutArchive {
+  DISPONIBLE
+  ABSENT
+  CORROMPU
+}
+
+/// Archive PDF d'un manifeste dont le circuit est clos.
+///
+/// ── Stratégie retenue : stocker ET pouvoir régénérer ──
+/// Le fichier est écrit sur volume au moment où le circuit se clôt, et son
+/// empreinte est conservée. À la demande de téléchargement, l'empreinte est
+/// revérifiée ; si le fichier manque ou diverge, le PDF est régénéré depuis
+/// l'instantané — mais le téléchargement est alors marqué comme SECOURS,
+/// jamais présenté comme l'original.
+///
+/// Pourquoi les deux plutôt que l'un des deux :
+///   • le stockage seul repose sur la seule intégrité du volume, et un
+///     manifeste de 2026 doit rester lisible en 2036 ;
+///   • la régénération seule suppose que Chromium, les polices et le gabarit
+///     produiront dans dix ans le même document qu'aujourd'hui. C'est faux :
+///     un PDF régénéré n'est jamais octet pour octet identique à l'original.
+///
+/// ── Ce que l'empreinte prouve, et ce qu'elle ne prouve pas ──
+/// `sha256_pdf` atteste que le fichier servi est bien celui qui a été archivé.
+/// Elle NE PERMET PAS de comparer un original à une régénération : deux rendus
+/// du même contenu diffèrent (horodatage interne, sous-ensembles de polices).
+/// La correspondance au CONTENU signé se vérifie par `hash_contenu`, repris de
+/// ManifesteSnapshot — c'est lui, et lui seul, qui fait foi sur le fond.
+model ArchiveManifeste {
+  id           String    @id @default(uuid())
+  manifeste_id String    @unique
+  manifeste    Manifeste @relation(fields: [manifeste_id], references: [id], onDelete: Cascade)
+  base_id      String
+  vol_id       String
+  numero_mission String
+  etape_vol    String
+
+  /// Chemin RELATIF à ARCHIVE_ROOT, ex. « 2026/08/uuid.pdf ».
+  /// Relatif et non absolu : déplacer le volume ne doit pas invalider la base.
+  chemin       String
+  taille_octets Int
+  /// SHA-256 des octets du PDF archivé. Contrôle d'intégrité du FICHIER.
+  sha256_pdf   String
+  /// SHA-256 du CONTENU signé, repris de ManifesteSnapshot. Fait foi sur le fond.
+  hash_contenu String
+  version_contenu Int
+
+  statut       StatutArchive @default(DISPONIBLE)
+  /// Date de clôture du circuit — celle qui a du sens pour un archiviste,
+  /// et non la date d'écriture du fichier, qui n'est qu'un détail technique.
+  date_cloture DateTime
+  genere_le    DateTime  @default(now())
+
+  nb_telechargements     Int       @default(0)
+  dernier_telechargement DateTime?
+  /// Horodatage de la dernière vérification d'empreinte réussie.
+  derniere_verification  DateTime?
+
+  @@index([base_id, date_cloture])
+  @@index([vol_id])
+  @@index([statut])
+}
+

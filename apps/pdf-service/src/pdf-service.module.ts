@@ -12,6 +12,9 @@ import { ManifesteDataService } from './pdf/manifeste-data.service';
 import { HealthModule } from './health/health.module';
 import { VerificationModule } from './verification/verification.module';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { ArchiveController } from './archives/archive.controller';
+import { ArchiveService } from './archives/archive.service';
+import { ArchiveConsumer } from './archives/archive-consumer.service';
 
 @Module({
   imports: [
@@ -30,7 +33,13 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     VerificationModule,
     HealthModule,
   ],
-  controllers: [PdfController],
-  providers: [PdfService, ManifesteDataService, JwtStrategy],
+  controllers: [PdfController, ArchiveController],
+  providers: [
+    PdfService, ManifesteDataService, JwtStrategy,
+    // Archivage : une seule instance de PdfService est partagée avec le
+    // rendu à la demande. Un module séparé en créerait une seconde, donc un
+    // second Chromium.
+    ArchiveService, ArchiveConsumer,
+  ],
 })
 export class PdfServiceModule {}

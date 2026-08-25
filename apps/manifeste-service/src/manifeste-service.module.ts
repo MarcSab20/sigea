@@ -11,6 +11,7 @@ import { PassagersModule } from './passagers/passagers.module';
 import { MaterielsModule } from './materiels/materiels.module';
 import { HealthModule } from './health/health.module';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { ExploitationModule } from './exploitation/exploitation.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     ManifesteModule,
     PassagersModule,
     MaterielsModule,
+    ExploitationModule,
     HealthModule,
   ],
   providers: [JwtStrategy],

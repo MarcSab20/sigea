@@ -30,11 +30,17 @@ import {
   StatutValidation,
   JwtPayload,
   ROLE_TO_ETAPE,
+  ETAPE_TO_ROLE,
   ETAPE_SEQUENCE,
   LIBELLE_ETAPE,
   composerTampon,
   etapeSuivante,
+  ETAPE_BLOQUEE_PAR_CONSIGNE,
+  AutoriteCentrale,
   rangEtape,
+  rolesEffectifs,
+  delegationPourRole,
+  estAutoriteCentrale,
 } from '@sigea/shared-types';
 import { EVENTS } from '@sigea/shared-events';
 import { EventPublisher } from '@sigea/shared-messaging';
@@ -117,18 +123,63 @@ export class ValidationStateMachine {
       );
     }
 
-    // ── Verrou CEMAA : ceinture et bretelles ──
-    // La séquence place déjà CEMAA_SENSIBLE avant COMBASE pour un manifeste
-    // sensible, mais on revérifie : l'ancienne version cherchait une étape
-    // CEMAA « EN_ATTENTE » et laissait donc passer le cas où l'étape
-    // n'existait pas du tout.
-    if (etape === EtapeValidation.COMBASE && manifeste.flag_sensible) {
-      const accordCemaa = manifeste.validations.find(
-        (v) => v.etape === EtapeValidation.CEMAA_SENSIBLE && v.statut === StatutValidation.APPROUVE,
-      );
-      if (!accordCemaa) {
+        // ── Consignes d'autorité non confirmées ──
+    //
+    // Le circuit est le MÊME pour tous les vols. Ce qui change, pour un vol
+    // ayant reçu une consigne du CEMAA ou du MAGE, c'est que l'autorité
+    // émettrice doit ATTESTER que sa consigne a été exécutée avant que le
+    // commandant de base engage son accord.
+    //
+    // Ce n'est pas une signature — aucun tampon n'est apposé à ce titre. C'est
+    // un accusé d'exécution, porté par la consigne elle-même.
+    //
+    // Le contrôle est data-driven : il ne teste PAS `flag_sensible`, mais
+    // l'existence d'une consigne en attente. Un vol sensible sans consigne
+    // n'est bloqué par rien ; un vol ordinaire ayant reçu une consigne l'est.
+    // C'est la règle exacte, et elle ne dépend ni du nombre d'autorités ni du
+    // nombre de consignes.
+    if (etape === ETAPE_BLOQUEE_PAR_CONSIGNE) {
+      const enAttente = await this.prisma.consigneCemaa.findMany({
+        where: {
+          vol_id: manifeste.vol_id,
+          // Consigne ciblant une escale précise, ou le vol entier.
+          OR: [{ escale_base_id: null }, { escale_base_id: manifeste.base_id }],
+          statut_realisation: { in: ['EMISE', 'NON_REALISEE'] },
+        },
+        select: {
+          id: true, autorite: true, type: true,
+          statut_realisation: true, observation_realisation: true,
+        },
+      });
+
+      if (enAttente.length) {
+        // Le message distingue « pas encore examinée » de « examinée et
+        // refusée » : dans le premier cas il faut relancer l'autorité, dans le
+        // second il faut corriger le manifeste. Confondre les deux ferait
+        // perdre du temps à tout le monde.
+        const nonExaminees = enAttente.filter((c) => c.statut_realisation === 'EMISE');
+        const refusees     = enAttente.filter((c) => c.statut_realisation === 'NON_REALISEE');
+
+        const details: string[] = [];
+        if (nonExaminees.length) {
+          const autorites = [...new Set(nonExaminees.map((c) => c.autorite))].join(' et ');
+          details.push(
+            `${nonExaminees.length} consigne(s) ${autorites} en attente de confirmation d'exécution`,
+          );
+        }
+        for (const c of refusees) {
+          details.push(
+            `consigne ${c.autorite} déclarée NON EXÉCUTÉE` +
+            (c.observation_realisation ? ` — « ${c.observation_realisation} »` : ''),
+          );
+        }
+
+        this.logger.warn(
+          `Signature ${etape} bloquée : manifeste=${manifeste_id} ` +
+          `${enAttente.length} consigne(s) non confirmée(s)`,
+        );
         throw new ForbiddenException(
-          'Manifeste sensible : accord CEMAA requis avant signature du commandant de base',
+          `Signature impossible : ${details.join(' ; ')}.`,
         );
       }
     }
@@ -136,10 +187,7 @@ export class ValidationStateMachine {
     // ── Composition du tampon, figée maintenant ──
     // CEMAA_SENSIBLE n'est pas un des 5 blocs imprimés : c'est un verrou.
     // On enregistre l'étape sans tampon.
-    const tampon =
-      etape === EtapeValidation.CEMAA_SENSIBLE
-        ? null
-        : composerTampon({
+    const tampon = composerTampon({
             etape,
             base_numero:       manifeste.base.numero,
             base_code:         manifeste.base.code_base,
@@ -381,6 +429,18 @@ export class ValidationStateMachine {
       this.logger.warn(`Consigne CEMAA : manifeste ${manifeste_id} introuvable`);
       return;
     }
+
+    const empreinte = {
+      mention:          tampon.mention,
+      tampon_ligne1:    tampon.tampon_ligne1,
+      tampon_ligne2:    tampon.tampon_ligne2    ?? null,
+      signataire_nom:   tampon.signataire_nom,
+      signataire_grade: tampon.signataire_grade,
+      par_interim:      Boolean(delegation),
+      interim_id:       delegation?.id ?? null,
+      titulaire_nom:    titulaire?.nom   ?? null,
+      titulaire_grade:  titulaire?.grade ?? null,
+    };
 
     const dejaApplique = manifeste.consignes_cemaa_appliquees;
 

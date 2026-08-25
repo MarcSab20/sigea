@@ -2,6 +2,7 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '@sigea/shared-database';
+import { RoleUtilisateur, DelegationJwt } from '@sigea/shared-types';
 import { OtpService } from '../otp/otp.service';
 import { BackupCodeService } from '../backup/backup-code.service';
 import { SecurityService, LoginContext } from '../security/security.service';
@@ -20,7 +21,13 @@ export interface LoginResult {
   backup_codes?: string[];
   access_token?: string;
   refresh_token?: string;
-  user?: { id: string; role: string; base_id: string; nom: string; prenom: string; grade: string };
+  user?: {
+    id: string; role: string; base_id: string;
+    nom: string; prenom: string; grade: string;
+    escadron_id?: string | null;
+    /** Délégations actives — l'IHM s'en sert pour afficher le bandeau d'intérim. */
+    interims?: Array<{ id: string; role: string; titulaire: string }>;
+  };
 }
 
 @Injectable()
@@ -122,7 +129,9 @@ export class AuthService {
     await this.prisma.challengeToken.delete({ where: { token: challengeToken } });
 
     const user = await this.finalizeContext(userId, ctx);
-    return { ...this.issueTokens(user), backup_codes };
+    // `await` indispensable : issueTokens est désormais asynchrone (lecture des
+    // délégations). Sans lui, le spread produirait les champs d'une Promise.
+    return { ...(await this.issueTokens(user)), backup_codes };
   }
 
   async verifyOtp(challengeToken: string, otpCode: string, ctx: LoginContext): Promise<LoginResult> {
@@ -150,15 +159,32 @@ export class AuthService {
     return this.issueTokens(user);
   }
 
+  /**
+   * Le rafraîchissement RELIT les délégations.
+   *
+   * C'est ce qui borne réellement la fenêtre de révocation : au plus une durée
+   * de jeton d'accès. Un intérim révoqué disparaît du jeton suivant sans
+   * qu'aucune action de l'utilisateur ne soit requise.
+   */
   async refresh(refreshToken: string): Promise<{ access_token: string }> {
     try {
       const payload = this.jwt.verify(refreshToken) as { sub: string; type: string };
       if (payload.type !== 'refresh') throw new Error();
       const user = await this.prisma.utilisateur.findUnique({ where: { id: payload.sub } });
       if (!user || !user.actif || user.verrouille_securite) throw new UnauthorizedException();
+
+      const interims = await this.delegationsActives(user.id);
+
       return {
         access_token: this.jwt.sign(
-          { sub: user.id, role: user.role, base_id: user.base_id, jti: crypto.randomBytes(8).toString('hex') },
+          {
+            sub: user.id,
+            role: user.role,
+            base_id: user.base_id,
+            escadron_id: user.escadron_id ?? null,
+            ...(interims.length ? { interims } : {}),
+            jti: crypto.randomBytes(8).toString('hex'),
+          },
           { expiresIn: '10m', algorithm: 'RS256' },
         ),
       };
@@ -176,20 +202,86 @@ export class AuthService {
     return user;
   }
 
-  private issueTokens(user: {
+  /**
+   * Délégations en vigueur à l'instant de l'émission du jeton.
+   *
+   * Trois conditions cumulatives, toutes évaluées en SQL :
+   *   • actif = true          → la révocation est immédiate côté base ;
+   *   • date_debut <= now     → une délégation programmée n'anticipe pas ;
+   *   • date_fin > now | null → une délégation échue ne survit pas.
+   *
+   * On ne renvoie QUE l'identifiant et le rôle : le jeton ne doit pas
+   * véhiculer d'état d'annuaire (nom, grade), qui serait figé pour 10 minutes
+   * et pourrait diverger de la base au moment de composer un tampon.
+   */
+  private async delegationsActives(userId: string): Promise<DelegationJwt[]> {
+    const maintenant = new Date();
+    const rows = await this.prisma.interim.findMany({
+      where: {
+        suppleant_id: userId,
+        actif: true,
+        date_debut: { lte: maintenant },
+        OR: [{ date_fin: null }, { date_fin: { gt: maintenant } }],
+      },
+      select: { id: true, role_delegue: true },
+    });
+    return rows.map((r) => ({ id: r.id, role: r.role_delegue as RoleUtilisateur }));
+  }
+
+  private async issueTokens(user: {
     id: string; role: string; base_id: string; nom: string; prenom: string; grade: string;
-  }): LoginResult {
+    escadron_id?: string | null;
+  }): Promise<LoginResult> {
+    const delegations = await this.delegationsActives(user.id);
+
     const access_token = this.jwt.sign(
-      { sub: user.id, role: user.role, base_id: user.base_id, jti: crypto.randomBytes(8).toString('hex') },
+      {
+        sub: user.id,
+        role: user.role,
+        base_id: user.base_id,
+        escadron_id: user.escadron_id ?? null,
+        // Champ omis quand il n'y a aucune délégation : inutile d'alourdir
+        // le jeton du cas nominal, qui est l'immense majorité.
+        ...(delegations.length ? { interims: delegations } : {}),
+        jti: crypto.randomBytes(8).toString('hex'),
+      },
       { expiresIn: this.config.get('JWT_EXPIRES_IN') ?? '10m', algorithm: 'RS256' },
     );
+
     const refresh_token = this.jwt.sign(
       { sub: user.id, type: 'refresh', jti: crypto.randomBytes(8).toString('hex') },
       { expiresIn: '8h', algorithm: 'RS256' },
     );
+
+    // Détail lisible pour l'IHM uniquement (bandeau « Vous exercez l'intérim
+    // de … »). Ces libellés ne sont PAS dans le jeton : ils sont relus à
+    // chaque connexion et n'ont donc jamais à être invalidés.
+    let interimsIhm: Array<{ id: string; role: string; titulaire: string }> | undefined;
+    if (delegations.length) {
+      const details = await this.prisma.interim.findMany({
+        where: { id: { in: delegations.map((d) => d.id) } },
+        select: {
+          id: true, role_delegue: true,
+          titulaire: { select: { nom: true, prenom: true, grade: true } },
+        },
+      });
+      interimsIhm = details.map((d) => ({
+        id: d.id,
+        role: d.role_delegue,
+        titulaire: `${d.titulaire.grade} ${d.titulaire.nom} ${d.titulaire.prenom}`.trim(),
+      }));
+    }
+
     return {
-      step: 'COMPLETE', access_token, refresh_token,
-      user: { id: user.id, role: user.role, base_id: user.base_id, nom: user.nom, prenom: user.prenom, grade: user.grade },
+      step: 'COMPLETE',
+      access_token,
+      refresh_token,
+      user: {
+        id: user.id, role: user.role, base_id: user.base_id,
+        nom: user.nom, prenom: user.prenom, grade: user.grade,
+        escadron_id: user.escadron_id ?? null,
+        ...(interimsIhm ? { interims: interimsIhm } : {}),
+      },
     };
   }
 }

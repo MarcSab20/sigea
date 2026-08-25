@@ -1,5 +1,5 @@
 import { Injectable, CanActivate, ExecutionContext, ForbiddenException, Logger } from '@nestjs/common';
-import { RoleUtilisateur, JwtPayload } from '@sigea/shared-types';
+import { JwtPayload, rolesEffectifs, estAutoriteCentrale } from '@sigea/shared-types';
 
 @Injectable()
 export class BaseCloisonnementGuard implements CanActivate {
@@ -13,15 +13,24 @@ export class BaseCloisonnementGuard implements CanActivate {
     const user = req.user;
     if (!user) return false;
 
-    // CEMAA : lecture seule sur toutes les bases
-    if (user.role === RoleUtilisateur.CEMAA) {
+    // ── Autorités centrales : lecture seule sur toutes les bases ──
+    //
+    // CEMAA et MAGE. Le test passe par `estAutoriteCentrale` et non par une
+    // comparaison à RoleUtilisateur.CEMAA : ajouter une autorité demain ne
+    // demandera aucune modification ici.
+    //
+    // `rolesEffectifs` couvre en outre le cas d'une délégation : un suppléant
+    // exerçant l'intérim d'une autorité centrale bénéficie du même périmètre.
+    if (rolesEffectifs(user).some(estAutoriteCentrale)) {
       if (req.method !== 'GET') {
-        throw new ForbiddenException('CEMAA : accès en écriture non autorisé via ce circuit');
+        throw new ForbiddenException(
+          'Autorité centrale : accès en écriture non autorisé via ce circuit',
+        );
       }
       return true;
     }
 
-    // Cloisonnement strict : base_id du token vs base_id de la ressource
+    // Cloisonnement strict : base_id du token vs base_id de la ressource.
     // req.body / req.params / req.headers peuvent être absents (ex. GET sans
     // corps) : chaînage optionnel obligatoire, sinon TypeError → 500 sur les GET.
     const resourceBaseId =

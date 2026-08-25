@@ -239,7 +239,11 @@ services:
       DATABASE_URL: postgresql://sigea_app:${DB_PASSWORD}@postgres:5432/sigea
       RABBITMQ_URL: amqp://sigea:${RABBITMQ_PASSWORD}@rabbitmq:5672
       CEMAA_ENCRYPTION_KEY: ${CEMAA_ENCRYPTION_KEY}
+      NUMERO_CONTROLE_KEY: "${NUMERO_CONTROLE_KEY}"
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
+      ARCHIVE_ROOT: /var/lib/sigvea/archives
+    volumes:
+      - archives:/var/lib/sigvea/archives
     depends_on:
       postgres:  { condition: service_healthy }
       rabbitmq:  { condition: service_healthy }

@@ -84,6 +84,18 @@ export class ProxyController {
     return this.proxyService.forward(req, res, 'manifeste');
   }
 
+    // ── EXPLOITATION ───────────────────────────────────────────────────────────
+  @All('exploitation')
+  @UseGuards(JwtAuthGuard)
+  proxyExploitationRoot(@Req() req: Request, @Res() res: Response): Promise<void> {
+    return this.proxyService.forward(req, res, 'manifeste');
+  }
+  @All('exploitation/*path')
+  @UseGuards(JwtAuthGuard)
+  proxyExploitation(@Req() req: Request, @Res() res: Response): Promise<void> {
+    return this.proxyService.forward(req, res, 'manifeste');
+  }
+
   // ── VALIDATIONS ────────────────────────────────────────────────────────────
   @All('validations')
   @UseGuards(JwtAuthGuard)
@@ -105,6 +117,18 @@ export class ProxyController {
   @All('cemaa/*path')
   @UseGuards(JwtAuthGuard)
   proxyCemaa(@Req() req: Request, @Res() res: Response): Promise<void> {
+    return this.proxyService.forward(req, res, 'cemaa');
+  }
+
+    // ── MAGE ───────────────────────────────────────────────────────────────────
+  @All('mage')
+  @UseGuards(JwtAuthGuard)
+  proxyMageRoot(@Req() req: Request, @Res() res: Response): Promise<void> {
+    return this.proxyService.forward(req, res, 'cemaa');
+  }
+  @All('mage/*path')
+  @UseGuards(JwtAuthGuard)
+  proxyMage(@Req() req: Request, @Res() res: Response): Promise<void> {
     return this.proxyService.forward(req, res, 'cemaa');
   }
 
