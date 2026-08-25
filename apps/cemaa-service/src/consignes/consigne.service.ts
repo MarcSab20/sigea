@@ -9,14 +9,13 @@
 //
 // Ce qui EST séparé, en revanche : la clé de chiffrement. Voir `cle()`.
 
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
 import { PrismaService } from '@sigea/shared-database';
 import { CemaaCryptoService } from '@sigea/shared-crypto';
-import { AutoriteCentrale } from '@sigea/shared-types';
+import { AutoriteCentrale, StatutConsigne } from '@sigea/shared-types';
 import { CONSIGNE_EVENTS } from '@sigea/shared-events';
 import { EventPublisher } from '@sigea/shared-messaging';
-import { CreateConsigneDto, UpdateConsigneDto } from './dto/create-consigne.dto';
-
+import { CreateConsigneDto, UpdateConsigneDto, , ConfirmerConsigneDto } from './dto/create-consigne.dto';
 @Injectable()
 export class ConsigneService {
   private readonly logger = new Logger(ConsigneService.name);
@@ -120,6 +119,92 @@ export class ConsigneService {
       consigne.escale_base_id,
     );
     return updated;
+  }
+
+    /**
+   * L'autorité émettrice atteste — ou dément — que sa consigne a été exécutée.
+   *
+   * C'est le seul acte que CEMAA et MAGE posent sur le circuit. Ce n'est PAS
+   * une signature : aucun tampon n'est apposé, aucune étape n'est franchie.
+   * C'est un accusé d'exécution, qui lève (ou maintient) le blocage du
+   * manifeste à l'étape ETAPE_BLOQUEE_PAR_CONSIGNE.
+   *
+   * ── Seul l'émetteur juge ──
+   * Le MAGE ne confirme pas une consigne du CEMAA, et réciproquement. Une
+   * autorité qui pourrait valider l'exécution de la consigne d'une autre
+   * viderait le contrôle de son sens : c'est celui qui a ordonné qui constate.
+   *
+   * ── NON_REALISEE n'est pas définitif ──
+   * Le manifeste reste bloqué, le chef d'escale corrige, l'autorité statue de
+   * nouveau. D'où l'absence de contrainte d'immuabilité : contrairement à un
+   * tampon, une confirmation se révise tant que le circuit n'est pas clos.
+   */
+  async confirmerRealisation(
+    id: string,
+    dto: ConfirmerConsigneDto,
+    agentId: string,
+    autorite: AutoriteCentrale,
+  ): Promise<unknown> {
+    const consigne = await this.prisma.consigneCemaa.findUnique({
+      where: { id },
+      select: { id: true, autorite: true, vol_id: true, statut_realisation: true },
+    });
+    if (!consigne) throw new NotFoundException(`Consigne ${id} introuvable`);
+
+    if (consigne.autorite !== autorite) {
+      throw new ForbiddenException(
+        `Cette consigne émane de l'autorité ${consigne.autorite}. ` +
+        "Seul son émetteur peut constater son exécution.",
+      );
+    }
+
+    if (dto.statut === StatutConsigne.NON_REALISEE && !dto.observation?.trim()) {
+      // Sans observation, le chef d'escale ne sait pas quoi corriger — et le
+      // blocage devient une impasse plutôt qu'une consigne.
+      throw new BadRequestException(
+        "Déclarer une consigne NON EXÉCUTÉE impose de préciser ce qui manque.",
+      );
+    }
+
+    const maj = await this.prisma.consigneCemaa.update({
+      where: { id },
+      data: {
+        statut_realisation:      dto.statut,
+        confirme_par:            agentId,
+        confirme_le:             new Date(),
+        observation_realisation: dto.observation?.trim() ?? null,
+      },
+    });
+
+    this.logger.warn(
+      `Consigne ${autorite} ${id} : ${consigne.statut_realisation} → ${dto.statut} ` +
+      `(vol=${consigne.vol_id}, par=${agentId})`,
+    );
+    return maj;
+  }
+
+  /**
+   * Consignes en attente de constat, pour l'autorité courante.
+   *
+   * C'est la file de travail de l'espace CEMAA / MAGE : sans cet écran,
+   * l'autorité ne saurait pas qu'un manifeste l'attend, et le blocage
+   * ressemblerait à une panne.
+   */
+  async enAttenteDeConstat(autorite: AutoriteCentrale): Promise<unknown[]> {
+    return this.prisma.consigneCemaa.findMany({
+      where: { autorite, statut_realisation: { in: ['EMISE', 'NON_REALISEE'] } },
+      select: {
+        id: true, type: true, date: true, statut_realisation: true,
+        observation_realisation: true, places_bloquees: true, masse_bloquee_kg: true,
+        vol: {
+          select: {
+            numero_mission: true, date_heure: true, immatriculation: true,
+            statut: true,
+          },
+        },
+      },
+      orderBy: { date: 'asc' },
+    });
   }
 
   /**

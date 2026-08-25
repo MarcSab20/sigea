@@ -120,3 +120,15 @@ export enum FonctionEquipage {
   MECANICIEN = 'MECANICIEN',
   AUTRE      = 'AUTRE',
 }
+
+/** Suivi d'exécution d'une consigne d'autorité centrale. */
+export enum StatutConsigne {
+  /// Émise, exécution non encore constatée. Bloque le circuit.
+  EMISE        = 'EMISE',
+  /// L'autorité atteste que la consigne a été exécutée.
+  REALISEE     = 'REALISEE',
+  /// L'autorité constate qu'elle ne l'a pas été. Bloque jusqu'à correction.
+  NON_REALISEE = 'NON_REALISEE',
+  /// Consigne retirée par son émetteur. Ne bloque plus.
+  ANNULEE      = 'ANNULEE',
+}

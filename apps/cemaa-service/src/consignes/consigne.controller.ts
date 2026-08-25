@@ -37,6 +37,16 @@ abstract class ConsigneControllerBase {
   protected parVol(volId: string): Promise<unknown[]> {
     return this.consigneService.findByVol(volId, this.autorite);
   }
+
+  protected confirmer(
+    id: string, dto: ConfirmerConsigneDto, user: JwtPayload,
+  ): Promise<unknown> {
+    return this.consigneService.confirmerRealisation(id, dto, user.sub, this.autorite);
+  }
+
+  protected aConstater(): Promise<unknown[]> {
+    return this.consigneService.enAttenteDeConstat(this.autorite);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -78,6 +88,35 @@ export class ConsigneCemaaController extends ConsigneControllerBase {
   findByVol(@Param('volId', ParseUUIDPipe) volId: string): Promise<unknown[]> {
     return this.parVol(volId);
   }
+
+  /**
+   * File de travail : consignes dont l'exécution reste à constater.
+   * Sans cet écran, l'autorité ignorerait qu'un manifeste l'attend, et le
+   * blocage au COMBASE ressemblerait à une panne.
+   */
+  @Get('a-constater')
+  @Roles(RoleUtilisateur.CEMAA)          // RoleUtilisateur.MAGE côté MAGE
+  @UseGuards(RolesGuard)
+  @Audit('cemaa.consigne.a_constater')   // mage.consigne.a_constater
+  aConstaterRoute(): Promise<unknown[]> {
+    return this.aConstater();
+  }
+
+  /**
+   * Constat d'exécution. PATCH et non POST : on modifie l'état d'une consigne
+   * existante, on n'en crée pas une nouvelle.
+   */
+  @Patch(':id/realisation')
+  @Roles(RoleUtilisateur.CEMAA)          // RoleUtilisateur.MAGE côté MAGE
+  @UseGuards(RolesGuard)
+  @Audit('cemaa.consigne.realisation')   // mage.consigne.realisation
+  confirmerRoute(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ConfirmerConsigneDto,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<unknown> {
+    return this.confirmer(id, dto, user);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -117,5 +156,34 @@ export class ConsigneMageController extends ConsigneControllerBase {
   @Audit('mage.consigne.view')
   findByVol(@Param('volId', ParseUUIDPipe) volId: string): Promise<unknown[]> {
     return this.parVol(volId);
+  }
+
+    /**
+   * File de travail : consignes dont l'exécution reste à constater.
+   * Sans cet écran, l'autorité ignorerait qu'un manifeste l'attend, et le
+   * blocage au COMBASE ressemblerait à une panne.
+   */
+  @Get('a-constater')
+  @Roles(RoleUtilisateur.CEMAA)          // RoleUtilisateur.MAGE côté MAGE
+  @UseGuards(RolesGuard)
+  @Audit('cemaa.consigne.a_constater')   // mage.consigne.a_constater
+  aConstaterRoute(): Promise<unknown[]> {
+    return this.aConstater();
+  }
+
+  /**
+   * Constat d'exécution. PATCH et non POST : on modifie l'état d'une consigne
+   * existante, on n'en crée pas une nouvelle.
+   */
+  @Patch(':id/realisation')
+  @Roles(RoleUtilisateur.CEMAA)          // RoleUtilisateur.MAGE côté MAGE
+  @UseGuards(RolesGuard)
+  @Audit('cemaa.consigne.realisation')   // mage.consigne.realisation
+  confirmerRoute(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ConfirmerConsigneDto,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<unknown> {
+    return this.confirmer(id, dto, user);
   }
 }
