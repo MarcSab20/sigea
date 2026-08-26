@@ -3,8 +3,36 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content="#F4F1EC" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <title>SIGEA — Gestion des Escales Aériennes</title>
+
+    <meta name="description" content="SIGEA — Système Intégré de Gestion des Escales Aériennes. Dématérialisation du manifeste d'escale et du circuit de visa. Accès réservé au personnel autorisé." />
+
+    <!--
+      Polices de la vitrine.
+      ─────────────────────────────────────────────────────────────────────────
+      Trois rôles, et la distinction porte du sens :
+        Barlow Condensed → signalétique (piste, fuselage, panneaux de service)
+        Inter            → ce qu'un humain a rédigé
+        IBM Plex Mono    → ce que la machine atteste (empreintes, codes, heures)
+
+      Déclarées ici, et non par `@import` dans une feuille de style : un
+      `@import` bloque le rendu le temps de résoudre la requête, alors qu'un
+      `<link>` précédé de `preconnect` part immédiatement, en parallèle.
+
+      ⚠ Site sans accès Internet sortant (réseau isolé) : voir l'encadré
+      « Polices hors ligne » du README de la vitrine. La page reste lisible
+      sans ces fichiers — les replis système sont déclarés dans landing.css.
+    -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+    />
+
+    <title>SIGEA — Gestion des Vols et Escales Aériennes</title>
   </head>
   <body>
     <div id="root"></div>
