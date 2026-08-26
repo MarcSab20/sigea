@@ -39,7 +39,30 @@ export enum EtapeValidation {
   COMGMO         = 'COMGMO',
   COMBORD        = 'COMBORD',
   CEMAA_SENSIBLE = 'CEMAA_SENSIBLE',
+  /**
+   * Étape HISTORIQUE, jamais produite depuis le lot 4.
+   *
+   * Déclarée uniquement pour rester alignée sur l'enum PostgreSQL et pour que
+   * les manifestes signés avant le lot 4 restent lisibles. Voir
+   * ETAPES_HISTORIQUES (circuit.ts) : toute valeur listée là ne peut plus
+   * apposer de tampon — composerTampon() lève une exception si on essaie.
+   */
+  MAGE_SENSIBLE  = 'MAGE_SENSIBLE',
   COMBASE        = 'COMBASE',
+}
+
+/**
+ * Autorité centrale émettrice d'une consigne.
+ *
+ * Distincte de RoleUtilisateur à dessein : le rôle dit QUI se connecte,
+ * l'autorité dit AU NOM DE QUOI une consigne est émise. Les deux se
+ * correspondent aujourd'hui un pour un (AUTORITE_TO_ROLE, circuit.ts), mais
+ * les confondre interdirait plus tard qu'un officier délégué émette au nom
+ * du MAGE — exactement le cas que le gestionnaire d'intérim doit couvrir.
+ */
+export enum AutoriteCentrale {
+  CEMAA = 'CEMAA',
+  MAGE  = 'MAGE',
 }
 
 export enum MentionSignature {
@@ -97,6 +120,8 @@ export enum TypeConsigne {
 export enum OrigineEnregistrement {
   SAISIE = 'SAISIE',
   CEMAA  = 'CEMAA',
+  /** Ligne imposée par le MAGE. Cloisonnée de celle du CEMAA. */
+  MAGE   = 'MAGE',
 }
 
 export enum NiveauConfidentialite {
@@ -123,12 +148,8 @@ export enum FonctionEquipage {
 
 /** Suivi d'exécution d'une consigne d'autorité centrale. */
 export enum StatutConsigne {
-  /// Émise, exécution non encore constatée. Bloque le circuit.
   EMISE        = 'EMISE',
-  /// L'autorité atteste que la consigne a été exécutée.
   REALISEE     = 'REALISEE',
-  /// L'autorité constate qu'elle ne l'a pas été. Bloque jusqu'à correction.
   NON_REALISEE = 'NON_REALISEE',
-  /// Consigne retirée par son émetteur. Ne bloque plus.
   ANNULEE      = 'ANNULEE',
 }

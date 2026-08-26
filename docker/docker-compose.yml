@@ -264,3 +264,4 @@ volumes:
   pgdata:     { driver: local }
   redisdata:  { driver: local }
   rabbitmqdata: { driver: local }
+  archives:     { driver: local }

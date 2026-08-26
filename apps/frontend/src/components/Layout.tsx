@@ -116,7 +116,7 @@ export default function Layout({ children }: { children: React.ReactNode }): Rea
                   cursor: 'pointer', letterSpacing: '0.01em',
                 }}>
                 <span style={{ fontSize: 15, flexShrink: 0, width: 20, textAlign: 'center',
-                  color: special && isActive ? accent : 'inherit'
+                  color: special && isActive ? accent : 'inherit' }}>
                   {item.icon}
                 </span>
                 {!collapsed && <span>{item.label}</span>}
@@ -195,7 +195,7 @@ export default function Layout({ children }: { children: React.ReactNode }): Rea
         <footer style={{ padding: '10px 24px', borderTop: `1px solid ${T.border}`,
           display: 'flex', justifyContent: 'space-between', fontSize: 10,
           color: T.textMute, background: T.bgCard }}>
-          <span>SIGEA v1.0 · FAC/DSIC · Confidentiel Défense</span>
+          <span>SIGVEA v1.0 · FAC/DSIC · Confidentiel Défense</span>
           <span>Toutes les actions sont auditées · SHA-256</span>
         </footer>
       </div>

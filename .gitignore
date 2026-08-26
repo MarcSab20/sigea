@@ -10,3 +10,5 @@ coverage/
 prisma/generated/
 *.key
 *.pem
+token.txt
+setup_otp.json

@@ -4,6 +4,7 @@ import {
   StatutValidation,
   BLOCS_SIGNATURE,
   LIBELLE_ETAPE,
+  MENTION_INTERIM,
 } from '@sigea/shared-types';
 
 // ─── Contrat d'entrée ──────────────────────────────────────────────────────
@@ -20,6 +21,17 @@ export interface TamponData {
   signataire_nom:   string | null;
   signataire_grade: string | null;
   date_heure:       Date | string | null;
+  /**
+   * Signature apposée au titre d'une délégation (besoin 6).
+   *
+   * Ces trois champs sont FIGÉS dans ValidationEtape à l'instant de la
+   * signature, jamais recalculés à l'impression : révoquer une délégation ne
+   * doit pas réécrire un document déjà signé, et un titulaire muté ne doit pas
+   * disparaître du tampon qu'il a fait apposer en son nom.
+   */
+  par_interim?:     boolean;
+  titulaire_nom?:   string | null;
+  titulaire_grade?: string | null;
 }
 
 export interface ManifesteRenderData {
@@ -115,6 +127,24 @@ function tamponSvg(t: TamponData): string {
   const dateStr = esc(fmtDateCourte(t.date_heure));
   const mention = esc(t.mention);
 
+  // ── Mention d'intérim ──
+  //
+  // Le « P/I » se place À GAUCHE de la mention principale, comme sur un
+  // parapheur papier : c'est un qualificatif de la signature, pas une
+  // signature distincte. Le nom du titulaire empêché figure sous le trait
+  // inférieur, avec la date — un contrôleur doit pouvoir lire, sur le seul
+  // tampon, POUR QUI le signataire a signé. Sans cela la mention n'apprend
+  // rien : on saurait qu'il y a eu intérim, pas de quel poste.
+  const pi = t.par_interim
+    ? `<text x="26" y="56" text-anchor="middle" font-family="Arial, sans-serif" font-size="13"
+             font-weight="800" fill="${INK}">${esc(MENTION_INTERIM)}</text>`
+    : '';
+
+  const ligneTitulaire = t.par_interim && t.titulaire_nom
+    ? `<text x="80" y="137" text-anchor="middle" font-family="Arial, sans-serif" font-size="7"
+             fill="${INK}">p/ ${esc(`${t.titulaire_grade ?? ''} ${t.titulaire_nom}`.trim())}</text>`
+    : '';
+
   // Rôle/signataire : 1 ligne (VU simple) ou 2 lignes (COMBORD/COMBASE).
   const lignes = l2
     ? `<text x="80" y="86" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="700" fill="${INK}">${l1}</text>
@@ -125,12 +155,14 @@ function tamponSvg(t: TamponData): string {
     <svg viewBox="0 0 160 160" class="tampon" xmlns="http://www.w3.org/2000/svg">
       <circle cx="80" cy="80" r="70" fill="none" stroke="${INK}" stroke-width="3"/>
       <circle cx="80" cy="80" r="62" fill="none" stroke="${INK}" stroke-width="1.2"/>
+      ${pi}
       <text x="80" y="56" text-anchor="middle" font-family="Arial, sans-serif" font-size="19"
             font-weight="800" fill="${INK}" letter-spacing="1">${mention}</text>
       <line x1="34" y1="64" x2="126" y2="64" stroke="${INK}" stroke-width="1"/>
       ${lignes}
       <line x1="42" y1="112" x2="118" y2="112" stroke="${INK}" stroke-width="0.8"/>
       <text x="80" y="127" text-anchor="middle" font-family="Arial, sans-serif" font-size="8.5" fill="${INK}">${dateStr}</text>
+      ${ligneTitulaire}
     </svg>`;
 }
 
@@ -139,6 +171,7 @@ function blocSignature(etape: EtapeValidation, t: TamponData | undefined): strin
     etape, statut: StatutValidation.EN_ATTENTE,
     mention: null, tampon_ligne1: null, tampon_ligne2: null,
     signataire_nom: null, signataire_grade: null, date_heure: null,
+    par_interim: false, titulaire_nom: null, titulaire_grade: null,
   };
   return `
     <div class="bloc">

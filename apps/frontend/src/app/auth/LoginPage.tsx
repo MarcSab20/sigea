@@ -188,18 +188,57 @@ export default function LoginPage(): React.ReactElement {
               <div style={{ fontSize: 13, color: C.anthraciteSub, marginBottom: 22, lineHeight: 1.6 }}>
                 Est-ce votre première connexion sur cet appareil / ce poste ?
               </div>
-              <button onClick={() => { setFirstConnection(true); setStep('CREDENTIALS'); }}
-                style={{ width: '100%', padding: '14px', marginBottom: 12, background: C.greenBg,
-                  border: `1px solid ${C.greenBorder}`, borderRadius: 8, color: C.green,
-                  fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
-                Oui, c'est ma première connexion
-              </button>
-              <button onClick={() => { setFirstConnection(false); setStep('CREDENTIALS'); }}
-                style={{ width: '100%', padding: '14px', background: C.input,
-                  border: `1px solid ${C.border}`, borderRadius: 8, color: C.anthraciteSub,
-                  fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
+              {/*
+                Hiérarchie visuelle voulue : le cas COURANT (« ce n'est pas ma
+                première connexion ») est l'action principale — vert plein,
+                pleine largeur, en tête. Le cas RARE et lourd de conséquences
+                (enrôlement d'un nouveau facteur) est secondaire : rouge plein,
+                nettement plus petit, en dessous.
+
+                Le rouge n'est pas décoratif. Répondre « oui » par erreur
+                déclenche un ré-enrôlement TOTP : l'ancien secret est remplacé,
+                l'application d'authentification déjà configurée cesse de
+                fonctionner, et il faut un administrateur pour rattraper. Un
+                bouton d'avertissement se justifie ; un bouton neutre, non.
+
+                `type="button"` : sans lui, un bouton placé dans un <form>
+                soumet le formulaire au premier Entrée. Le composant n'a pas de
+                <form> aujourd'hui, mais l'oubli se paie cher le jour où on en
+                ajoute un.
+              */}
+              <button type="button"
+                onClick={() => { setFirstConnection(false); setStep('CREDENTIALS'); }}
+                style={{ width: '100%', padding: '16px', marginBottom: 14,
+                  background: C.green, border: `1px solid ${C.green}`, borderRadius: 8,
+                  color: '#ffffff', fontSize: 15, fontWeight: 700, cursor: 'pointer',
+                  letterSpacing: '0.01em',
+                  boxShadow: '0 2px 8px rgba(31,110,61,0.22)' }}>
                 Non, ce n'est pas ma première connexion
               </button>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10,
+                margin: '4px 0 14px' }}>
+                <div style={{ flex: 1, height: 1, background: C.border }} />
+                <span style={{ fontSize: 10, color: C.anthraciteDim,
+                  letterSpacing: '0.14em', textTransform: 'uppercase' }}>ou</span>
+                <div style={{ flex: 1, height: 1, background: C.border }} />
+              </div>
+
+              <button type="button"
+                onClick={() => { setFirstConnection(true); setStep('CREDENTIALS'); }}
+                style={{ display: 'block', margin: '0 auto', width: '72%',
+                  padding: '10px 14px',
+                  background: C.red, border: `1px solid ${C.red}`, borderRadius: 7,
+                  color: '#ffffff', fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
+                  letterSpacing: '0.01em' }}>
+                Oui, c'est ma première connexion
+              </button>
+
+              <div style={{ fontSize: 10.5, color: C.anthraciteDim, textAlign: 'center',
+                marginTop: 10, lineHeight: 1.5 }}>
+                L'enrôlement remplace le secret d'authentification existant.
+                Ne le choisissez que si aucune application n'est encore configurée.
+              </div>
             </>
           )}
 

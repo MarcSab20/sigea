@@ -15,7 +15,7 @@ import { CemaaCryptoService } from '@sigea/shared-crypto';
 import { AutoriteCentrale, StatutConsigne } from '@sigea/shared-types';
 import { CONSIGNE_EVENTS } from '@sigea/shared-events';
 import { EventPublisher } from '@sigea/shared-messaging';
-import { CreateConsigneDto, UpdateConsigneDto, , ConfirmerConsigneDto } from './dto/create-consigne.dto';
+import { CreateConsigneDto, UpdateConsigneDto, ConfirmerConsigneDto } from './dto/create-consigne.dto';
 @Injectable()
 export class ConsigneService {
   private readonly logger = new Logger(ConsigneService.name);

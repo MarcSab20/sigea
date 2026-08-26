@@ -19,7 +19,9 @@ import { JwtAuthGuard, RolesGuard, Roles, CurrentUser } from '@sigea/shared-auth
 import { RoleUtilisateur, JwtPayload, AutoriteCentrale } from '@sigea/shared-types';
 import { Audit } from '@sigea/shared-audit';
 import { ConsigneService } from './consigne.service';
-import { CreateConsigneDto, UpdateConsigneDto } from './dto/create-consigne.dto';
+import {
+  CreateConsigneDto, UpdateConsigneDto, ConfirmerConsigneDto,
+} from './dto/create-consigne.dto';
 
 abstract class ConsigneControllerBase {
   protected abstract readonly autorite: AutoriteCentrale;

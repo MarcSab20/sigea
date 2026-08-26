@@ -53,6 +53,12 @@ export class ManifesteDataService {
             etape: true, statut: true, mention: true,
             tampon_ligne1: true, tampon_ligne2: true,
             signataire_nom: true, signataire_grade: true, date_heure: true,
+            // Besoin 6 : la mention « P/I » et le nom du titulaire empêché
+            // sont imprimés sur le tampon. Sans ces trois colonnes ici, le
+            // gabarit reçoit `undefined` et n'imprime rien — la délégation
+            // serait enregistrée en base mais invisible sur le document, ce
+            // qui est exactement le contraire du besoin.
+            par_interim: true, titulaire_nom: true, titulaire_grade: true,
           },
         },
       },
@@ -130,6 +136,9 @@ export class ManifesteDataService {
         signataire_nom:   v.signataire_nom,
         signataire_grade: v.signataire_grade,
         date_heure:       v.date_heure,
+        par_interim:      v.par_interim ?? false,
+        titulaire_nom:    v.titulaire_nom   ?? null,
+        titulaire_grade:  v.titulaire_grade ?? null,
       })),
     };
 

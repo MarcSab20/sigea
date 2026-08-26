@@ -20,7 +20,7 @@
     "docker:logs": "docker compose -f docker/docker-compose.yml logs -f"
   },
   "prisma": {
-  "seed": "ts-node --project tsconfig.base.json prisma/seed.ts"
+    "seed": "ts-node --project tsconfig.base.json prisma/seed.ts"
   },
   "devDependencies": {
     "@nx/eslint": "18.x",
@@ -28,15 +28,16 @@
     "@nx/nest": "18.x",
     "@nx/node": "18.x",
     "@nx/react": "18.x",
+    "@nx/vite": "^18.3.5",
     "@nx/webpack": "18.x",
     "@nx/workspace": "18.x",
     "@prisma/client": "^5.22.0",
     "@swc/core": "^1.4.0",
     "@swc/jest": "^0.2.36",
+    "@types/amqplib": "^0.10.5",
     "@types/bcryptjs": "^2.4.6",
     "@types/jest": "^29.5.12",
     "@types/node": "^20.11.0",
-    "@types/amqplib": "^0.10.5",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
     "eslint": "^8.57.0",

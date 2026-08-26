@@ -51,6 +51,7 @@ COPY --from=builder --chown=sigea:nodejs /app/prisma ./prisma
 COPY --from=builder --chown=sigea:nodejs /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder --chown=sigea:nodejs /app/node_modules/@prisma/client ./node_modules/@prisma/client
 
+RUN mkdir -p /var/lib/sigvea/archives && chown -R sigea:nodejs /var/lib/sigvea
 USER sigea
 EXPOSE ${PORT:-3000}
 

@@ -6,6 +6,12 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
+    // `import.meta.env` est une extension de Vite, pas du standard ECMAScript.
+    // Sans cette declaration, TypeScript ne connait que `import.meta.url` et
+    // rejette `import.meta.env.VITE_API_URL` — l'erreur
+    // « Property 'env' does not exist on type 'ImportMeta' » vue au build.
+    // Le code etait correct ; c'est la configuration qui ne le declarait pas.
+    "types": ["vite/client"],
     "strict": true,
     "noEmit": true,
     "baseUrl": ".",
