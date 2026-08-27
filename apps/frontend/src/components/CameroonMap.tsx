@@ -1,331 +1,656 @@
 // apps/frontend/src/components/CameroonMap.tsx
-// Carte interactive du Cameroun avec bases aériennes et tracking IoT
+//
+// ═══════════════════════════════════════════════════════════════════════════
+// CARTE DE SITUATION OPÉRATIONNELLE
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ⚠ CE QUI A CHANGÉ, ET POURQUOI IL FALLAIT LE CHANGER
+//
+// La version précédente affichait, sous le titre « Tracking aéronefs temps
+// réel », un appareil immatriculé TJ-AAF placé à lat 6.2 / lng 11.8, dont la
+// position était déplacée toutes les deux secondes par :
+//
+//     lat: a.lat + (Math.random() - 0.5) * 0.1
+//
+// Autrement dit : un aéronef inventé, à une position inventée, dérivant au
+// hasard, présenté comme de la donnée temps réel sur le tableau de bord d'un
+// système de commandement. Rien dans l'écran ne signalait la simulation —
+// seul un commentaire dans le code le disait.
+//
+// Sur un produit de défense, c'est un risque et pas un détail : un officier de
+// permanence n'a aucun moyen de distinguer cette trace d'une vraie.
+//
+// Le schéma Prisma ne contient AUCUN champ de position, de télémétrie ou
+// d'horodatage de vol en route. Il n'existe donc aujourd'hui aucune source à
+// partir de laquelle une position pourrait être calculée honnêtement.
+//
+// ── Ce que cette version affiche à la place ──────────────────────────────
+//
+// Uniquement de la donnée réelle, tirée de `GET /vols` :
+//
+//   • les LIAISONS ACTIVES — pour chaque vol EN_COURS, la route
+//     départ → escales → arrivée, parcourue par un flux animé ;
+//   • les VOLS PLANIFIÉS des prochaines 24 h, en trait discontinu ;
+//   • l'ACTIVITÉ PAR BASE — nombre de liaisons qui la touchent.
+//
+// Le flux est un tiret qui circule, délibérément PAS une icône d'aéronef :
+// un avion dessiné à un point de la carte se lit comme « l'appareil est ici »,
+// ce qui serait faux. Un flux qui circule se lit comme « cette liaison est en
+// cours », ce qui est exact.
+//
+// ── Quand vous aurez une vraie source ────────────────────────────────────
+//
+// Passez la prop `sourcePositions`. La carte affiche alors les aéronefs à leur
+// position mesurée, orientés selon leur cap, avec leur traînée — et le voyant
+// d'état passe au vert « en direct ». Un seul point d'entrée à implémenter :
+// le type `SourcePositions` ci-dessous. Rien d'autre n'est à modifier.
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { api } from '@/lib/api';
 import { T } from '@/lib/theme';
+import { REGIONS_CM, CADRE_CM, projeterCM } from '@/app/landing/cameroon.geo';
+import './cameroon-map.css';
 
-interface Base {
-  code: string;
-  nom: string;
-  ville: string;
+/* ═══════════════════════════════════════════════════════════════════════════
+   POINT D'EXTENSION — SOURCE DE POSITIONS RÉELLES
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+export interface PositionAeronef {
+  immatriculation: string;
   lat: number;
   lng: number;
-  actif: boolean;
+  /** Altitude en pieds. */
+  alt_ft?: number;
+  /** Vitesse sol en nœuds. */
+  vitesse_kt?: number;
+  /** Cap vrai, en degrés. Oriente le glyphe. */
+  cap_deg?: number;
+  /** Horodatage de la mesure, ISO 8601. Sert à détecter une source figée. */
+  horodatage: string;
+  numero_mission?: string;
 }
 
-interface AeronefPosition {
-  immat: string;
-  type: string;
-  lat: number;
-  lng: number;
-  alt: number;
-  vitesse: number;
-  cap: number;
-  statut: 'EN_VOL' | 'AU_SOL' | 'INCONNU';
-  mission?: string;
+/**
+ * Fonction appelée à chaque cycle de rafraîchissement.
+ *
+ * Elle doit renvoyer les positions MESURÉES des aéronefs en vol — ADS-B,
+ * balise IoT, liaison de données. Elle ne doit jamais renvoyer de position
+ * estimée ou interpolée : la carte affiche ce qu'elle reçoit comme étant
+ * mesuré, et l'annonce comme tel à l'utilisateur.
+ *
+ * Exemple d'implémentation :
+ *
+ *     <CameroonMap sourcePositions={async () => {
+ *       const r = await api.get<PositionAeronef[]>('/telemetrie/positions');
+ *       return r.data;
+ *     }} />
+ */
+export type SourcePositions = () => Promise<PositionAeronef[]>;
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RÉFÉRENTIEL LOCAL
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+interface BaseGeo {
+  code: string; nom: string; ville: string;
+  lat: number; lng: number; regionId: string;
 }
 
-const BASES_POSITIONS: Base[] = [
-  { code: 'BA101', nom: 'Base Aérienne 101', ville: 'Yaoundé',    lat: 3.8480,  lng: 11.5021, actif: true },
-  { code: 'BA102', nom: 'Base Aérienne 102', ville: 'Bertoua',    lat: 4.5772,  lng: 13.6846, actif: true },
-  { code: 'BA201', nom: 'Base Aérienne 201', ville: 'Douala',     lat: 4.0061,  lng: 9.7069,  actif: true },
-  { code: 'BA301', nom: 'Base Aérienne 301', ville: 'Garoua',     lat: 9.3347,  lng: 13.3781, actif: true },
-  { code: 'BA302', nom: 'Base Aérienne 302', ville: 'Ngaoundéré', lat: 7.3570,  lng: 13.5720, actif: true },
-  { code: 'BA401', nom: 'Base Aérienne 401', ville: 'Maroua',     lat: 10.5957, lng: 14.3273, actif: true },
-  { code: 'BA501', nom: 'Base Aérienne 501', ville: 'Bamenda',    lat: 5.9597,  lng: 10.1494, actif: true },
+const BASES: BaseGeo[] = [
+  { code: 'BA101', nom: 'Base Aérienne 101', ville: 'Yaoundé',    lat: 3.8480,  lng: 11.5021, regionId: 'CM-CE' },
+  { code: 'BA102', nom: 'Base Aérienne 102', ville: 'Bertoua',    lat: 4.5772,  lng: 13.6846, regionId: 'CM-ES' },
+  { code: 'BA201', nom: 'Base Aérienne 201', ville: 'Douala',     lat: 4.0061,  lng: 9.7069,  regionId: 'CM-LT' },
+  { code: 'BA301', nom: 'Base Aérienne 301', ville: 'Garoua',     lat: 9.3347,  lng: 13.3781, regionId: 'CM-NO' },
+  { code: 'BA302', nom: 'Base Aérienne 302', ville: 'Ngaoundéré', lat: 7.3570,  lng: 13.5720, regionId: 'CM-AD' },
+  { code: 'BA401', nom: 'Base Aérienne 401', ville: 'Maroua',     lat: 10.5957, lng: 14.3273, regionId: 'CM-EN' },
+  { code: 'BA501', nom: 'Base Aérienne 501', ville: 'Bamenda',    lat: 5.9597,  lng: 10.1494, regionId: 'CM-NW' },
 ];
 
-// Limites géographiques du Cameroun
-const MAP = {
-  latMin: 1.65, latMax: 13.08,
-  lngMin: 8.45, lngMax: 16.20,
-  width: 420, height: 480,
-};
+/** Période de rafraîchissement, alignée sur celle du tableau de bord. */
+const PERIODE_MS = 30_000;
 
-function geoToPixel(lat: number, lng: number): { x: number; y: number } {
-  const x = ((lng - MAP.lngMin) / (MAP.lngMax - MAP.lngMin)) * MAP.width;
-  const y = ((MAP.latMax - lat) / (MAP.latMax - MAP.latMin)) * MAP.height;
-  return { x, y };
+/* ═══════════════════════════════════════════════════════════════════════════
+   DONNÉES DE VOL
+   Formes tolérantes : selon les routes, le service renvoie soit les
+   identifiants seuls, soit les bases imbriquées. Les deux sont acceptées.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+interface BaseRef { id?: string; code_base?: string; nom?: string }
+
+interface Vol {
+  id: string;
+  numero_mission: string;
+  immatriculation: string;
+  date_heure: string;
+  statut: 'PLANIFIE' | 'EN_COURS' | 'CLOTURE' | 'ANNULE';
+  type_mission?: string;
+  flag_sensible?: boolean;
+  base_depart_id?: string;  base_depart?: BaseRef;
+  base_arrivee_id?: string; base_arrivee?: BaseRef;
+  escales?: { base_id?: string; ordre: number; base?: BaseRef }[];
 }
 
-// Contour simplifié du Cameroun (coordonnées approximatives)
-const CAMEROUN_PATH = `
-  M 95,470 L 60,440 L 30,400 L 10,350 L 15,300 L 5,260 L 20,220
-  L 40,190 L 35,150 L 50,120 L 80,90 L 110,70 L 140,50 L 170,30
-  L 200,20 L 230,15 L 260,25 L 290,40 L 310,60 L 330,80 L 350,110
-  L 370,140 L 390,170 L 405,200 L 415,230 L 410,260 L 400,290
-  L 390,320 L 380,350 L 370,370 L 350,390 L 320,410 L 290,430
-  L 260,450 L 230,465 L 200,470 L 170,468 L 140,465 L 120,470 Z
-`;
+/** Résout un vol vers des codes de base connus du référentiel local. */
+function codesDeVol(v: Vol): string[] {
+  const resoudre = (id?: string, ref?: BaseRef): string | null => {
+    const cible = ref?.code_base ?? id ?? ref?.id;
+    if (!cible) return null;
+    const b = BASES.find(x => x.code === cible || x.code === ref?.code_base);
+    if (b) return b.code;
+    // Le service peut renvoyer un UUID : on retombe sur le code s'il est
+    // présent dans l'objet imbriqué, sinon la liaison n'est pas traçable.
+    return ref?.code_base ?? null;
+  };
 
-export default function CameroonMap(): React.ReactElement {
-  const [selected, setSelected] = useState<Base | null>(null);
-  const [aeronefs, setAeronefs] = useState<AeronefPosition[]>([]);
-  const [tooltip, setTooltip] = useState<{ x: number; y: number; content: string } | null>(null);
-  const animRef = useRef<number>(0);
-  const timeRef = useRef<number>(0);
+  const dep = resoudre(v.base_depart_id, v.base_depart);
+  const arr = resoudre(v.base_arrivee_id, v.base_arrivee);
+  const esc = (v.escales ?? [])
+    .slice()
+    .sort((a, b) => a.ordre - b.ordre)
+    .map(e => resoudre(e.base_id, e.base))
+    .filter((c): c is string => Boolean(c));
 
-  // Simulation IoT — positions aéronefs en vol
+  return [dep, ...esc, arr].filter((c): c is string => Boolean(c));
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   GÉOMÉTRIE
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const pt = (code: string): { x: number; y: number } | null => {
+  const b = BASES.find(x => x.code === code);
+  return b ? projeterCM(b.lat, b.lng) : null;
+};
+
+/**
+ * Arc entre deux bases. Le point de contrôle est décalé perpendiculairement à
+ * la corde : deux liaisons entre les mêmes bases ne se superposent pas si leur
+ * flèche diffère, et la courbure évoque une route aérienne plutôt qu'un câble.
+ */
+function arc(a: { x: number; y: number }, b: { x: number; y: number }, fleche = 0.16): string {
+  const mx = (a.x + b.x) / 2;
+  const my = (a.y + b.y) / 2;
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  return `M${a.x.toFixed(1)},${a.y.toFixed(1)} Q${(mx - dy * fleche).toFixed(1)},${(my + dx * fleche).toFixed(1)} ${b.x.toFixed(1)},${b.y.toFixed(1)}`;
+}
+
+interface Liaison {
+  cle: string;
+  volId: string;
+  vol: Vol;
+  d: string;
+  depart: string;
+  arrivee: string;
+  enCours: boolean;
+  /** Durée d'un cycle de flux : dépareillée d'une liaison à l'autre, sinon le
+   *  maillage se lit comme un motif décoratif et non comme du trafic. */
+  duree: number;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   COMPOSANT
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+export default function CameroonMap({ sourcePositions, periodeMs = PERIODE_MS }: {
+  /** Source de positions mesurées. Absente, aucun aéronef n'est affiché. */
+  sourcePositions?: SourcePositions;
+  periodeMs?: number;
+}): React.ReactElement {
+  const [vols, setVols] = useState<Vol[]>([]);
+  const [positions, setPositions] = useState<PositionAeronef[]>([]);
+  const [chargement, setChargement] = useState(true);
+  const [erreur, setErreur] = useState<string | null>(null);
+  const [derniereMaj, setDerniereMaj] = useState<Date | null>(null);
+
+  const [baseActive, setBaseActive] = useState<string | null>(null);
+  const [volActif, setVolActif] = useState<string | null>(null);
+  const [monte, setMonte] = useState(false);
+
+  const svg = useRef<SVGSVGElement>(null);
+
+  // Lever de rideau : une frame de délai garantit que les transitions partent
+  // bien de leur état initial.
   useEffect(() => {
-    // Données simulées (à remplacer par WebSocket IoT réel)
-    const mockPositions: AeronefPosition[] = [
-      {
-        immat: 'TJ-AAF', type: 'C-130',
-        lat: 6.2, lng: 11.8, alt: 7500, vitesse: 480, cap: 45,
-        statut: 'EN_VOL', mission: 'MIS-2026-0441',
-      },
-    ];
-    setAeronefs(mockPositions);
-
-    // Animation position aéronef
-    const animate = (ts: number): void => {
-      if (ts - timeRef.current > 2000) {
-        timeRef.current = ts;
-        setAeronefs(prev => prev.map(a => ({
-          ...a,
-          lat: a.lat + (Math.random() - 0.5) * 0.1,
-          lng: a.lng + (Math.random() - 0.5) * 0.1,
-          alt: a.alt + (Math.random() - 0.5) * 50,
-          vitesse: a.vitesse + (Math.random() - 0.5) * 10,
-        })));
-      }
-      animRef.current = requestAnimationFrame(animate);
-    };
-    animRef.current = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(animRef.current);
+    const f = requestAnimationFrame(() => setMonte(true));
+    return () => cancelAnimationFrame(f);
   }, []);
 
-  const getCapRotation = (cap: number): string => `rotate(${cap}deg)`;
+  // ── Chargement périodique ────────────────────────────────────────────────
+  const charger = useCallback(async (): Promise<void> => {
+    try {
+      const r = await api.get<Vol[]>('/vols');
+      setVols(Array.isArray(r.data) ? r.data : []);
+      setErreur(null);
+      setDerniereMaj(new Date());
+    } catch {
+      // La carte garde son dernier état connu et le signale, plutôt que de se
+      // vider : un écran de veille qui se vide sur un incident réseau se lit
+      // comme « plus aucun vol », ce qui est le pire contresens possible.
+      setErreur('Liaison au service des vols interrompue');
+    } finally {
+      setChargement(false);
+    }
+
+    if (sourcePositions) {
+      try {
+        setPositions(await sourcePositions());
+      } catch {
+        setPositions([]);
+      }
+    }
+  }, [sourcePositions]);
+
+  useEffect(() => {
+    charger();
+    const id = window.setInterval(charger, periodeMs);
+    return () => window.clearInterval(id);
+  }, [charger, periodeMs]);
+
+  // ── Liaisons ─────────────────────────────────────────────────────────────
+  const liaisons = useMemo<Liaison[]>(() => {
+    const demain = Date.now() + 24 * 3600_000;
+    const retenus = vols.filter(v =>
+      v.statut === 'EN_COURS'
+      || (v.statut === 'PLANIFIE' && new Date(v.date_heure).getTime() <= demain),
+    );
+
+    const out: Liaison[] = [];
+    retenus.forEach((v, iv) => {
+      const codes = codesDeVol(v);
+      for (let i = 0; i < codes.length - 1; i += 1) {
+        const a = pt(codes[i]);
+        const b = pt(codes[i + 1]);
+        if (!a || !b) continue;
+        // La flèche alterne de signe : deux vols empruntant la même paire de
+        // bases restent distinguables.
+        const fleche = (iv % 2 === 0 ? 1 : -1) * (0.13 + (iv % 3) * 0.05);
+        out.push({
+          cle: `${v.id}-${i}`, volId: v.id, vol: v,
+          d: arc(a, b, fleche),
+          depart: codes[i], arrivee: codes[i + 1],
+          enCours: v.statut === 'EN_COURS',
+          duree: 5 + ((iv * 1.3 + i) % 4),
+        });
+      }
+    });
+    return out;
+  }, [vols]);
+
+  const enCours = vols.filter(v => v.statut === 'EN_COURS');
+  const planifies = vols.filter(v =>
+    v.statut === 'PLANIFIE'
+    && new Date(v.date_heure).getTime() <= Date.now() + 24 * 3600_000);
+
+  /** Nombre de liaisons touchant chaque base — pilote l'onde d'activité. */
+  const activite = useMemo(() => {
+    const m = new Map<string, number>();
+    liaisons.filter(l => l.enCours).forEach(l => {
+      m.set(l.depart, (m.get(l.depart) ?? 0) + 1);
+      m.set(l.arrivee, (m.get(l.arrivee) ?? 0) + 1);
+    });
+    return m;
+  }, [liaisons]);
+
+  const volsDeLaBase = baseActive
+    ? vols.filter(v => codesDeVol(v).includes(baseActive)
+        && (v.statut === 'EN_COURS' || v.statut === 'PLANIFIE'))
+    : [];
+
+  const enDirect = Boolean(sourcePositions) && positions.length > 0;
 
   return (
-    <div style={{ position: 'relative', width: '100%' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        marginBottom: 12 }}>
+    <div className={`cm-root ${monte ? 'is-in' : ''}`} style={{ width: '100%' }}>
+
+      {/* ═══ Entête ═══ */}
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+        gap: 16, marginBottom: 12, flexWrap: 'wrap',
+      }}>
         <div>
           <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>
-            Situation Opérationnelle
+            Situation opérationnelle
           </div>
-          <div style={{ fontSize: 11, color: T.textDim }}>
-            Carte des bases · Tracking aéronefs temps réel
+          <div style={{ fontSize: 11, color: T.textDim, marginTop: 2 }}>
+            Liaisons en cours et vols planifiés sous 24 h
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center', fontSize: 10,
-          color: T.textDim }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%',
-              background: T.green, display: 'inline-block' }} />
-            Base active
-          </span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ color: T.amberLight, fontSize: 12 }}>✈</span>
-            En vol
-          </span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%',
-              background: T.textDim, display: 'inline-block' }} />
-            Au sol
-          </span>
-        </div>
+
+        <EtatSource enDirect={enDirect} branchee={Boolean(sourcePositions)}
+                    erreur={erreur} maj={derniereMaj} periodeMs={periodeMs} />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 180px', gap: 16 }}>
-        {/* SVG Carte */}
-        <div style={{ background: T.bgAlt, borderRadius: 8, padding: 12,
-          border: `1px solid ${T.border}`, position: 'relative', overflow: 'hidden' }}>
-          <svg width="100%" viewBox={`0 0 ${MAP.width} ${MAP.height}`}
-            style={{ display: 'block' }}>
-            {/* Fond ocean/extérieur */}
-            <rect width={MAP.width} height={MAP.height} fill="#e8f4f8" rx="4" />
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 250px', gap: 16 }}>
 
-            {/* Contour Cameroun */}
-            <path d={CAMEROUN_PATH} fill="#f0ece4" stroke={T.border}
-              strokeWidth="1.5" />
+        {/* ═══ Carte ═══ */}
+        <div style={{
+          position: 'relative', border: `1px solid ${T.border}`, borderRadius: 8,
+          background: T.bgCard, padding: 12, overflow: 'hidden',
+        }}>
+          <svg
+            ref={svg}
+            viewBox={`0 0 ${CADRE_CM.w} ${CADRE_CM.h}`}
+            style={{ display: 'block', width: '100%', height: 'auto', maxHeight: 520 }}
+            role="img"
+            aria-label={`Carte du Cameroun. ${enCours.length} liaison(s) en cours, ${planifies.length} vol(s) planifié(s) sous 24 heures.`}
+          >
+            <defs>
+              <linearGradient id="cmTerre" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%"   stopColor="rgba(45,106,79,.13)" />
+                <stop offset="100%" stopColor="rgba(45,106,79,.04)" />
+              </linearGradient>
+              <linearGradient id="cmTerreOn" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%"   stopColor="rgba(45,106,79,.34)" />
+                <stop offset="100%" stopColor="rgba(45,106,79,.16)" />
+              </linearGradient>
+            </defs>
 
-            {/* Grille légère */}
-            {[...Array(8)].map((_, i) => (
-              <line key={`h${i}`} x1="0" y1={i * 60} x2={MAP.width} y2={i * 60}
-                stroke={T.border} strokeWidth="0.3" strokeDasharray="3,6" />
-            ))}
-            {[...Array(7)].map((_, i) => (
-              <line key={`v${i}`} x1={i * 60} y1="0" x2={i * 60} y2={MAP.height}
-                stroke={T.border} strokeWidth="0.3" strokeDasharray="3,6" />
-            ))}
-
-            {/* Lignes de connexion entre bases */}
-            {BASES_POSITIONS.map((b1, i) =>
-              BASES_POSITIONS.slice(i + 1, i + 2).map(b2 => {
-                const p1 = geoToPixel(b1.lat, b1.lng);
-                const p2 = geoToPixel(b2.lat, b2.lng);
+            {/* ── Régions ── */}
+            <g>
+              {REGIONS_CM.map((r, i) => {
+                const allumee = baseActive
+                  ? BASES.find(b => b.code === baseActive)?.regionId === r.id
+                  : false;
                 return (
-                  <line key={`${b1.code}-${b2.code}`}
-                    x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y}
-                    stroke={T.green} strokeWidth="0.5"
-                    strokeDasharray="4,4" opacity="0.3" />
+                  <path
+                    key={r.id} d={r.d} className="cm-region" data-on={allumee ? '1' : '0'}
+                    fill={allumee ? 'url(#cmTerreOn)' : 'url(#cmTerre)'}
+                    stroke={allumee ? T.green : 'rgba(45,106,79,.28)'}
+                    strokeWidth={1.2} strokeLinejoin="round"
+                    style={{ '--cm-d': `${i * 55}ms` } as React.CSSProperties}
+                  ><title>{r.nom}</title></path>
                 );
-              })
+              })}
+            </g>
+
+            {/* ── Liaisons ── */}
+            <g>
+              {liaisons.map((l, i) => {
+                const concerne = !baseActive
+                  || l.depart === baseActive || l.arrivee === baseActive;
+                const selectionne = volActif === l.volId;
+                const couleur = l.vol.flag_sensible ? T.red : l.enCours ? T.green : T.blue;
+
+                return (
+                  <g key={l.cle} className="cm-lien"
+                     data-dim={concerne ? '0' : '1'}
+                     onMouseEnter={() => setVolActif(l.volId)}
+                     onMouseLeave={() => setVolActif(null)}
+                     style={{ cursor: 'pointer' }}>
+                    <title>
+                      {l.vol.numero_mission} · {l.depart} → {l.arrivee} ·{' '}
+                      {l.enCours ? 'en cours' : 'planifié'}
+                    </title>
+
+                    <path
+                      d={l.d}
+                      className={`cm-route ${monte ? 'cm-route--trace' : 'cm-route--trace'}`}
+                      stroke={couleur}
+                      strokeWidth={selectionne ? 3 : l.enCours ? 2 : 1.4}
+                      strokeDasharray={l.enCours ? undefined : '7 7'}
+                      opacity={l.enCours ? 0.5 : 0.32}
+                      style={{ '--cm-d': `${400 + i * 60}ms` } as React.CSSProperties}
+                    />
+
+                    {/* Le flux ne circule que sur une liaison réellement en
+                        cours. Un vol planifié n'a rien qui bouge. */}
+                    {l.enCours && (
+                      <path
+                        d={l.d} className="cm-flux"
+                        stroke={couleur} strokeWidth={selectionne ? 5 : 4}
+                        style={{
+                          '--cm-dur': `${l.duree}s`,
+                          '--cm-d': `${i * -700}ms`,
+                        } as React.CSSProperties}
+                      />
+                    )}
+                  </g>
+                );
+              })}
+            </g>
+
+            {/* ── Bases ── */}
+            <g>
+              {BASES.map(b => {
+                const p = projeterCM(b.lat, b.lng);
+                const active = baseActive === b.code;
+                const n = activite.get(b.code) ?? 0;
+
+                return (
+                  <g key={b.code} className="cm-base" data-on={active ? '1' : '0'}
+                     onMouseEnter={() => setBaseActive(b.code)}
+                     onMouseLeave={() => setBaseActive(null)}
+                     onFocus={() => setBaseActive(b.code)}
+                     onBlur={() => setBaseActive(null)}
+                     tabIndex={0} role="button"
+                     aria-label={`${b.nom}, ${b.ville}. ${n} liaison(s) en cours.`}>
+
+                    {/* Onde émise uniquement si la base est réellement active. */}
+                    {n > 0 && (
+                      <circle cx={p.x} cy={p.y} r={11} className="cm-onde"
+                              stroke={T.green} strokeWidth={2}
+                              style={{ '--cm-d': `${(b.code.charCodeAt(4) % 5) * 400}ms` } as React.CSSProperties} />
+                    )}
+
+                    <circle cx={p.x} cy={p.y} r={17} className="cm-base__halo"
+                            stroke={T.green} strokeWidth={2} />
+                    <circle cx={p.x} cy={p.y} r={8} className="cm-base__pt"
+                            fill={n > 0 ? T.green : T.textDim}
+                            stroke={T.bgCard} strokeWidth={2.5} />
+
+                    <text x={p.x + 22} y={p.y + 3} className="cm-base__txt"
+                          fontFamily={T.mono} fontSize={22}
+                          fontWeight={active ? 700 : 400}
+                          fill={active ? T.green : T.textSub}>{b.code}</text>
+
+                    {/* Compteur de liaisons : l'information la plus utile en un
+                        coup d'œil sur un écran de veille. */}
+                    {n > 0 && (
+                      <text x={p.x + 22} y={p.y + 26} className="cm-base__txt"
+                            fontFamily={T.mono} fontSize={17} fill={T.green}>
+                        {n} liaison{n > 1 ? 's' : ''}
+                      </text>
+                    )}
+                  </g>
+                );
+              })}
+            </g>
+
+            {/* ── Aéronefs télémétrés ──
+                Rendus UNIQUEMENT si une source de positions mesurées est
+                branchée. Sans source, ce groupe est vide : la carte n'invente
+                aucune position. */}
+            {sourcePositions && (
+              <g>
+                {positions.map(a => {
+                  const p = projeterCM(a.lat, a.lng);
+                  return (
+                    <g key={a.immatriculation} className="cm-aeronef"
+                       transform={`translate(${p.x} ${p.y})`}>
+                      <title>
+                        {a.immatriculation}
+                        {a.numero_mission ? ` · ${a.numero_mission}` : ''}
+                        {a.alt_ft ? ` · ${a.alt_ft} ft` : ''}
+                        {a.vitesse_kt ? ` · ${a.vitesse_kt} kt` : ''}
+                      </title>
+                      <g className="cm-aeronef__glyphe"
+                         transform={`rotate(${a.cap_deg ?? 0})`}>
+                        <path d="M0,-13 L4,-2 L15,4 L15,7 L4,4 L3,11 L7,14 L7,16 L0,14 L-7,16 L-7,14 L-3,11 L-4,4 L-15,7 L-15,4 L-4,-2 Z"
+                              fill={T.amberLight} stroke={T.bgCard} strokeWidth={1.2} />
+                      </g>
+                      <text x={20} y={5} fontFamily={T.mono} fontSize={18} fill={T.amber}>
+                        {a.immatriculation}
+                      </text>
+                    </g>
+                  );
+                })}
+              </g>
             )}
-
-            {/* Bases aériennes */}
-            {BASES_POSITIONS.map(base => {
-              const { x, y } = geoToPixel(base.lat, base.lng);
-              const isSelected = selected?.code === base.code;
-              return (
-                <g key={base.code} style={{ cursor: 'pointer' }}
-                  onClick={() => setSelected(isSelected ? null : base)}>
-                  {/* Pulse animation */}
-                  {isSelected && (
-                    <circle cx={x} cy={y} r="20" fill="none"
-                      stroke={T.green} strokeWidth="1" opacity="0.4">
-                      <animate attributeName="r" from="12" to="24"
-                        dur="1.5s" repeatCount="indefinite" />
-                      <animate attributeName="opacity" from="0.6" to="0"
-                        dur="1.5s" repeatCount="indefinite" />
-                    </circle>
-                  )}
-                  {/* Hexagone base */}
-                  <polygon
-                    points={`${x},${y-10} ${x+9},${y-5} ${x+9},${y+5} ${x},${y+10} ${x-9},${y+5} ${x-9},${y-5}`}
-                    fill={isSelected ? T.green : T.bgCard}
-                    stroke={T.green} strokeWidth="1.5"
-                  />
-                  <text x={x} y={y+1} textAnchor="middle" dominantBaseline="middle"
-                    fontSize="5" fontWeight="700" fill={isSelected ? '#fff' : T.green}>
-                    ✈
-                  </text>
-                  {/* Label */}
-                  <text x={x} y={y + 16} textAnchor="middle" fontSize="8"
-                    fontWeight="600" fill={T.textSub}>
-                    {base.code}
-                  </text>
-                  <text x={x} y={y + 25} textAnchor="middle" fontSize="7"
-                    fill={T.textDim}>
-                    {base.ville}
-                  </text>
-                </g>
-              );
-            })}
-
-            {/* Aéronefs en vol */}
-            {aeronefs.map(a => {
-              if (a.statut !== 'EN_VOL') return null;
-              const { x, y } = geoToPixel(a.lat, a.lng);
-              return (
-                <g key={a.immat} style={{ cursor: 'pointer' }}>
-                  {/* Traînée */}
-                  <circle cx={x} cy={y} r="18" fill="none"
-                    stroke={T.amberLight} strokeWidth="1" opacity="0.2">
-                    <animate attributeName="r" from="8" to="22"
-                      dur="2s" repeatCount="indefinite" />
-                    <animate attributeName="opacity" from="0.4" to="0"
-                      dur="2s" repeatCount="indefinite" />
-                  </circle>
-                  {/* Icône aéronef */}
-                  <circle cx={x} cy={y} r="8"
-                    fill={T.amberLight} opacity="0.9" />
-                  <text x={x} y={y+1} textAnchor="middle" dominantBaseline="middle"
-                    fontSize="9" fill="#fff">✈</text>
-                  {/* Label */}
-                  <rect x={x - 18} y={y - 22} width="36" height="12"
-                    fill={T.amberLight} rx="3" opacity="0.9" />
-                  <text x={x} y={y - 14} textAnchor="middle" fontSize="7"
-                    fontWeight="600" fill="#fff">
-                    {a.immat}
-                  </text>
-                </g>
-              );
-            })}
           </svg>
-        </div>
 
-        {/* Panneau info */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {/* Info base sélectionnée */}
-          {selected ? (
-            <div style={{ padding: '12px 14px', background: T.greenBg,
-              border: `1px solid ${T.greenBorder}`, borderRadius: 6 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: T.green,
-                marginBottom: 6 }}>{selected.code}</div>
-              <div style={{ fontSize: 12, color: T.text, marginBottom: 4 }}>
-                {selected.nom}
-              </div>
-              <div style={{ fontSize: 11, color: T.textDim, marginBottom: 8 }}>
-                📍 {selected.ville}
-              </div>
-              <div style={{ fontSize: 10, color: T.textDim, fontFamily: T.mono }}>
-                {selected.lat.toFixed(4)}°N<br />
-                {selected.lng.toFixed(4)}°E
-              </div>
-              <div style={{ marginTop: 8, padding: '5px 8px', background: T.greenBg,
-                borderRadius: 4, fontSize: 10, color: T.green, fontWeight: 600 }}>
-                ● OPÉRATIONNELLE
-              </div>
-            </div>
-          ) : (
-            <div style={{ padding: '12px 14px', background: T.bgAlt,
-              border: `1px solid ${T.border}`, borderRadius: 6,
-              fontSize: 11, color: T.textDim, textAlign: 'center' }}>
-              Cliquez sur une base pour les détails
-            </div>
+          {chargement && (
+            <div style={{
+              position: 'absolute', inset: 0, display: 'grid', placeItems: 'center',
+              background: 'rgba(255,255,255,.72)', fontSize: 12, color: T.textDim,
+            }}>Chargement de la situation…</div>
           )}
+        </div>
 
-          {/* Aéronefs en vol */}
-          <div style={{ padding: '10px 12px', background: T.bgCard,
-            border: `1px solid ${T.border}`, borderRadius: 6 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: T.textSub,
-              textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
-              Aéronefs
-            </div>
-            {aeronefs.length === 0 ? (
-              <div style={{ fontSize: 11, color: T.textMute }}>Aucun en vol</div>
-            ) : aeronefs.map(a => (
-              <div key={a.immat} style={{ marginBottom: 8, padding: '8px',
-                background: a.statut === 'EN_VOL' ? T.amberBg : T.bgAlt,
-                borderRadius: 5, border: `1px solid ${a.statut === 'EN_VOL' ? T.amberBorder : T.border}` }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between',
-                  alignItems: 'center', marginBottom: 4 }}>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: T.text }}>
-                    {a.immat}
-                  </span>
-                  <span style={{ fontSize: 9, color: a.statut === 'EN_VOL' ? T.amberLight : T.textDim,
-                    background: a.statut === 'EN_VOL' ? T.amberBg : T.bgAlt,
-                    border: `1px solid ${a.statut === 'EN_VOL' ? T.amberBorder : T.border}`,
-                    borderRadius: 3, padding: '1px 5px' }}>
-                    {a.statut === 'EN_VOL' ? 'EN VOL' : 'AU SOL'}
-                  </span>
+        {/* ═══ Panneau ═══ */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
+          <Compteur label="Liaisons en cours" valeur={enCours.length} couleur={T.green} />
+          <Compteur label="Planifiés sous 24 h" valeur={planifies.length} couleur={T.blue} />
+
+          <div style={{
+            border: `1px solid ${T.border}`, borderRadius: 8, background: T.bgCard,
+            padding: '12px 14px', flex: 1, minHeight: 150, overflow: 'auto',
+          }}>
+            {baseActive ? (
+              <div className="cm-fiche">
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: T.text }}>
+                  {BASES.find(b => b.code === baseActive)?.ville}
                 </div>
-                {a.statut === 'EN_VOL' && (
-                  <div style={{ fontSize: 10, color: T.textDim, fontFamily: T.mono }}>
-                    <div>Alt: {a.alt.toFixed(0)} m</div>
-                    <div>Vit: {a.vitesse.toFixed(0)} km/h</div>
-                    <div>Cap: {a.cap}°</div>
-                    {a.mission && <div style={{ color: T.amberLight }}>
-                      {a.mission}
-                    </div>}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
+                <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 2, marginBottom: 10 }}>
+                  {baseActive} · {volsDeLaBase.length} vol{volsDeLaBase.length > 1 ? 's' : ''}
+                </div>
 
-          {/* Résumé bases */}
-          <div style={{ padding: '10px 12px', background: T.bgCard,
-            border: `1px solid ${T.border}`, borderRadius: 6 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: T.textSub,
-              textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>
-              Bases ({BASES_POSITIONS.length})
-            </div>
-            {BASES_POSITIONS.map(b => (
-              <div key={b.code} style={{ display: 'flex', justifyContent: 'space-between',
-                alignItems: 'center', padding: '3px 0',
-                borderBottom: `1px solid ${T.border}`,
-                cursor: 'pointer' }}
-                onClick={() => setSelected(selected?.code === b.code ? null : b)}>
-                <span style={{ fontSize: 10, color: T.textSub }}>{b.code}</span>
-                <span style={{ fontSize: 9, color: T.green }}>● {b.ville}</span>
+                {volsDeLaBase.length === 0 ? (
+                  <div style={{ fontSize: 11, color: T.textDim }}>Aucun vol actif ou planifié.</div>
+                ) : volsDeLaBase.slice(0, 8).map((v, i) => (
+                  <div key={v.id} className="cm-item"
+                       style={{
+                         '--cm-i': i, padding: '7px 9px', marginBottom: 5,
+                         border: `1px solid ${T.border}`,
+                         borderLeft: `3px solid ${v.statut === 'EN_COURS' ? T.green : T.blue}`,
+                         borderRadius: 4, background: T.bgAlt,
+                       } as React.CSSProperties}>
+                    <div style={{ fontSize: 11, fontFamily: T.mono, color: T.text, fontWeight: 600 }}>
+                      {v.numero_mission}
+                    </div>
+                    <div style={{ fontSize: 10, color: T.textDim, marginTop: 2 }}>
+                      {codesDeVol(v).join(' → ') || '—'}
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
+            ) : (
+              <Legende />
+            )}
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ÉTAT DE LA SOURCE
+   La distinction entre « donnée mesurée » et « donnée de planification » est
+   affichée en permanence. C'est précisément ce qui manquait.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function EtatSource({ enDirect, branchee, erreur, maj, periodeMs }: {
+  enDirect: boolean; branchee: boolean;
+  erreur: string | null; maj: Date | null; periodeMs: number;
+}): React.ReactElement {
+  const couleur = erreur ? T.red : enDirect ? T.green : T.amberLight;
+  const texte = erreur
+    ? erreur
+    : enDirect
+      ? 'Positions en direct'
+      : 'Aucune source de position — liaisons issues du plan de vol';
+
+  return (
+    <div style={{ minWidth: 250 }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8,
+        fontSize: 10.5, color: couleur, fontWeight: 600,
+      }}>
+        <span className="cm-voyant" data-live={enDirect && !erreur ? '1' : '0'}
+              style={{ background: couleur, color: couleur }} />
+        {texte}
+      </div>
+
+      {!branchee && !erreur && (
+        <div style={{ fontSize: 9.5, color: T.textDim, marginTop: 4, lineHeight: 1.5 }}>
+          Les tracés indiquent des liaisons actives, non des positions d&apos;aéronefs.
+        </div>
+      )}
+
+      {maj && (
+        <>
+          <div style={{ fontSize: 9.5, color: T.textDim, marginTop: 6, fontFamily: T.mono }}>
+            Mise à jour {maj.toLocaleTimeString('fr-FR')}
+          </div>
+          <div className="cm-fraicheur" style={{
+            background: T.bgAlt, marginTop: 4,
+            '--cm-periode': `${periodeMs}ms`,
+          } as React.CSSProperties}>
+            <i style={{ background: couleur, opacity: .5 }} />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function Compteur({ label, valeur, couleur }: {
+  label: string; valeur: number; couleur: string;
+}): React.ReactElement {
+  return (
+    <div style={{
+      border: `1px solid ${T.border}`, borderRadius: 8, background: T.bgCard,
+      padding: '10px 14px', position: 'relative', overflow: 'hidden',
+    }}>
+      <div style={{
+        fontSize: 9.5, color: T.textDim, textTransform: 'uppercase',
+        letterSpacing: '0.08em',
+      }}>{label}</div>
+      <div style={{
+        fontSize: 26, fontWeight: 700, color: couleur, fontFamily: T.display, lineHeight: 1.2,
+      }}>{valeur}</div>
+      <div style={{
+        position: 'absolute', bottom: 0, left: 0, right: 0, height: 3,
+        background: couleur, opacity: .28,
+      }} />
+    </div>
+  );
+}
+
+function Legende(): React.ReactElement {
+  const items = [
+    { c: T.green,      t: 'Liaison en cours', d: 'Flux animé' },
+    { c: T.blue,       t: 'Vol planifié',     d: 'Trait discontinu' },
+    { c: T.red,        t: 'Vol sensible',     d: 'Verrou CEMAA' },
+    { c: T.textDim,    t: 'Base au repos',    d: 'Aucune liaison' },
+  ];
+
+  return (
+    <div>
+      <div style={{
+        fontSize: 9.5, color: T.textDim, textTransform: 'uppercase',
+        letterSpacing: '0.08em', marginBottom: 9,
+      }}>Légende</div>
+      {items.map(i => (
+        <div key={i.t} style={{
+          display: 'flex', alignItems: 'center', gap: 9, marginBottom: 8,
+        }}>
+          <span style={{
+            width: 9, height: 9, borderRadius: '50%', background: i.c, flexShrink: 0,
+          }} />
+          <span style={{ minWidth: 0 }}>
+            <span style={{ display: 'block', fontSize: 11, color: T.textSub, fontWeight: 600 }}>
+              {i.t}
+            </span>
+            <span style={{ display: 'block', fontSize: 9.5, color: T.textDim }}>{i.d}</span>
+          </span>
+        </div>
+      ))}
+      <div style={{
+        marginTop: 12, paddingTop: 10, borderTop: `1px dashed ${T.border}`,
+        fontSize: 9.5, color: T.textDim, lineHeight: 1.55,
+      }}>
+        Survolez une base pour voir ses vols.
       </div>
     </div>
   );

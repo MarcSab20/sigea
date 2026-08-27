@@ -1,0 +1,236 @@
+/* ===========================================================================
+   apps/frontend/src/app/admin/admin.css
+   ---------------------------------------------------------------------------
+   Animations de l'espace Administration.
+
+   Le reste de l'écran est en styles en ligne — c'est la convention du fichier
+   existant et je ne la change pas. Mais les états de survol, les cascades
+   d'apparition et le mouvement réduit ne s'expriment pas en style en ligne :
+   ils vivent ici.
+
+   Tout repose sur `transform` et `opacity` (composition GPU, ni layout ni
+   paint). Aucune dépendance.
+
+   Portée : tout est préfixé `.ad-`.
+   =========================================================================== */
+
+/* ── Courbes ─────────────────────────────────────────────────────────────── */
+.ad-scope {
+  --ad-out:    cubic-bezier(0.23, 1, 0.32, 1);
+  --ad-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   1 · APPARITION EN CASCADE DES LIGNES
+   `--ad-i` porte l'index de la ligne ; 26 ms de décalage se lit comme un
+   déroulé, 0 ms comme un bloc qui saute. Plafonné à 12 pour qu'une table de
+   200 lignes ne mette pas cinq secondes à s'afficher.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.ad-row {
+  animation: adRow .42s var(--ad-out) both;
+  animation-delay: calc(min(var(--ad-i, 0), 12) * 26ms);
+}
+@keyframes adRow {
+  from { opacity: 0; transform: translate3d(0, 9px, 0); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Survol de ligne : le fond se pose, un liseré se tire depuis la gauche. */
+.ad-row-hover { position: relative; transition: background-color .18s ease; }
+.ad-row-hover::before {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: currentColor; opacity: .55;
+  transform: scaleY(0); transform-origin: center;
+  transition: transform .24s var(--ad-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  .ad-row-hover:hover { background: #faf8f5; }
+  .ad-row-hover:hover::before { transform: scaleY(1); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   2 · BOUTONS
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.ad-btn {
+  transition: transform .14s var(--ad-out), box-shadow .2s ease,
+              background-color .2s ease, border-color .2s ease, opacity .2s ease;
+}
+.ad-btn:active:not(:disabled) { transform: scale(.965); }
+.ad-btn:disabled { opacity: .55; cursor: not-allowed; }
+
+@media (hover: hover) and (pointer: fine) {
+  .ad-btn:hover:not(:disabled) { box-shadow: 0 2px 10px rgba(26,26,26,.10); }
+  .ad-btn-lift:hover:not(:disabled) { transform: translateY(-1px); }
+}
+
+/* Bouton d'actualisation : la flèche tourne pendant le chargement. */
+.ad-spin { display: inline-block; }
+.ad-spin[data-busy='1'] { animation: adSpin .9s linear infinite; }
+@keyframes adSpin { to { transform: rotate(360deg); } }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   3 · ONGLETS
+   Le liseré actif glisse au lieu de sauter d'un onglet à l'autre.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.ad-tab { position: relative; transition: color .2s ease; }
+.ad-tab::after {
+  content: ''; position: absolute; left: 0; right: 0; bottom: -2px; height: 2px;
+  background: currentColor;
+  transform: scaleX(0); transform-origin: center;
+  transition: transform .3s var(--ad-out);
+}
+.ad-tab[data-on='1']::after { transform: scaleX(1); }
+@media (hover: hover) and (pointer: fine) {
+  .ad-tab:hover::after { transform: scaleX(.55); }
+  .ad-tab[data-on='1']:hover::after { transform: scaleX(1); }
+}
+
+/* Le panneau entrant monte légèrement — assez pour marquer le changement,
+   pas assez pour faire attendre. */
+.ad-panel { animation: adPanel .32s var(--ad-out) both; }
+@keyframes adPanel {
+  from { opacity: 0; transform: translate3d(0, 10px, 0); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   4 · ALERTE DE COMPTES VERROUILLÉS
+   Une pulsation lente et large. Elle doit attirer l'œil au coup d'œil et
+   cesser d'exister dès qu'on lit la ligne — pas un clignotement.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.ad-alerte { animation: adAlerteIn .46s var(--ad-out) both; }
+@keyframes adAlerteIn {
+  from { opacity: 0; transform: translate3d(0, -10px, 0) scaleY(.94); }
+  to   { opacity: 1; transform: none; }
+}
+
+.ad-pastille { position: relative; }
+.ad-pastille::after {
+  content: ''; position: absolute; inset: -4px; border-radius: 50%;
+  border: 2px solid currentColor;
+  animation: adPulse 2.4s var(--ad-out) infinite;
+}
+@keyframes adPulse {
+  0%   { transform: scale(.8); opacity: .55; }
+  70%  { transform: scale(1.9); opacity: 0; }
+  100% { transform: scale(1.9); opacity: 0; }
+}
+
+/* Cadenas d'une ligne verrouillée : une oscillation brève, puis plus rien. */
+.ad-cadenas { display: inline-block; animation: adCadenas 3.6s var(--ad-out) infinite; }
+@keyframes adCadenas {
+  0%, 88%, 100% { transform: none; }
+  91%  { transform: rotate(-9deg); }
+  94%  { transform: rotate(7deg); }
+  97%  { transform: rotate(-3deg); }
+}
+
+/* Jauge d'échecs consécutifs (1/3, 2/3). */
+.ad-jauge { display: inline-flex; gap: 3px; vertical-align: middle; }
+.ad-jauge i {
+  width: 12px; height: 3px; border-radius: 2px; background: currentColor;
+  opacity: .18; transition: opacity .3s var(--ad-out), transform .3s var(--ad-out);
+  transform-origin: left;
+}
+.ad-jauge i[data-on='1'] { opacity: 1; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   5 · FENÊTRES
+   Jamais scale(0) : rien n'apparaît de nulle part.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.ad-voile   { animation: adVoile .22s var(--ad-out) both; }
+.ad-panneau { animation: adPanneau .30s var(--ad-out) both; }
+@keyframes adVoile   { from { opacity: 0; } to { opacity: 1; } }
+@keyframes adPanneau {
+  from { opacity: 0; transform: translate3d(0, 18px, 0) scale(.975); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   6 · CHARGEMENT
+   Un miroitement sur des blocs à la forme du contenu attendu, plutôt qu'un
+   « Chargement… » centré : la page ne se réorganise pas à l'arrivée.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.ad-skel {
+  border-radius: 4px;
+  background: linear-gradient(90deg, #ede9e1 25%, #f6f3ee 50%, #ede9e1 75%);
+  background-size: 200% 100%;
+  animation: adSkel 1.3s linear infinite;
+}
+@keyframes adSkel { to { background-position: -200% 0; } }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   7 · CHRONOLOGIE DES MOUVEMENTS
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.ad-fil { position: relative; }
+.ad-fil::before {
+  content: ''; position: absolute; left: 15px; top: 6px; bottom: 6px; width: 2px;
+  background: #d4cfc5; transform: scaleY(0); transform-origin: top;
+  animation: adFil .8s var(--ad-out) .1s forwards;
+}
+@keyframes adFil { to { transform: scaleY(1); } }
+
+.ad-jalon { position: relative; }
+.ad-jalon .ad-jalon-pt {
+  transition: transform .2s var(--ad-out), box-shadow .2s ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .ad-jalon:hover .ad-jalon-pt { transform: scale(1.18); }
+}
+
+/* Flèche avant → après */
+.ad-fleche { transition: transform .2s var(--ad-out); }
+@media (hover: hover) and (pointer: fine) {
+  .ad-jalon:hover .ad-fleche { transform: translateX(3px); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   8 · INTÉRIM — carte de délégation
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.ad-deleg { transition: transform .22s var(--ad-out), box-shadow .22s ease,
+                        border-color .22s ease; }
+@media (hover: hover) and (pointer: fine) {
+  .ad-deleg:hover { transform: translateY(-2px); box-shadow: 0 8px 22px -10px rgba(26,26,26,.22); }
+}
+
+/* Le trait titulaire → suppléant se tire à l'apparition. */
+.ad-passe { position: relative; }
+.ad-passe::before {
+  content: ''; position: absolute; left: 0; right: 0; top: 50%; height: 1.5px;
+  background: currentColor; opacity: .3;
+  transform: scaleX(0); transform-origin: left;
+  animation: adPasse .55s var(--ad-out) .15s forwards;
+}
+@keyframes adPasse { to { transform: scaleX(1); } }
+
+/* Compte à rebours d'une délégation à échéance. */
+.ad-echeance { transition: color .3s ease; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   9 · MOUVEMENT RÉDUIT
+   Moins de mouvement, pas zéro : les fondus qui aident à comprendre restent,
+   les déplacements et les boucles disparaissent.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+@media (prefers-reduced-motion: reduce) {
+  .ad-scope *, .ad-scope *::before, .ad-scope *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0ms !important;
+    transition-duration: .16s !important;
+  }
+  .ad-row, .ad-panel, .ad-alerte, .ad-panneau { transform: none; }
+  .ad-pastille::after, .ad-cadenas, .ad-spin[data-busy='1'], .ad-skel {
+    animation: none !important;
+  }
+  .ad-pastille::after { opacity: 0; }
+  .ad-fil::before, .ad-passe::before { transform: scaleY(1) scaleX(1); animation: none; }
+}

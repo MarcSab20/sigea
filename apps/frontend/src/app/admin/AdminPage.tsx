@@ -5,12 +5,24 @@ import { api } from '@/lib/api';
 import { T } from '@/lib/theme';
 import { toast } from 'sonner';
 
+// Briques et constantes extraites : elles sont désormais partagées avec les
+// onglets Intérims et Mouvements. Les dupliquer aurait garanti qu'elles
+// divergent au premier ajustement de thème.
+import {
+  Card, Field, Badge, Modal, StatMini,
+  ROLES, BASES_FAC, GRADES, MAX_ECHECS,
+  messageErreur, dateFr,
+  type Utilisateur,
+} from './admin.shared';
+import InterimTab from './InterimTab';
+import MouvementsTab from './MouvementsTab';
+import EscadronsTab from './EscadronsTab';
+import './admin.css';
+
 // ─── Types ────────────────────────────────────────────────────────────────────
-interface Utilisateur {
-  id: string; nom: string; prenom: string; grade: string;
-  login: string; role: string; base_id: string; actif: boolean;
-  last_login?: string; createdAt: string;
-}
+// `Utilisateur` est importé depuis admin.shared : il porte désormais les trois
+// champs d'état de sécurité (verrouille_securite, motif_verrouillage,
+// nb_echecs_connexion) ajoutés au select de personnels.service.ts.
 
 interface Base {
   id: string; code_base: string; nom: string; region: string;
@@ -24,128 +36,16 @@ interface AuditLog {
   ip?: string; content_hash: string; timestamp: string;
 }
 
-// ─── Constantes ───────────────────────────────────────────────────────────────
-const ROLES = [
-  { value: 'chef_escale', label: 'Chef d\'Escale',    color: T.green },
-  { value: 'comeso',      label: 'COMESO',            color: T.blue },
-  { value: 'comgmo',      label: 'COMGMO',            color: T.blue },
-  { value: 'combord',     label: 'COMBORD',           color: T.amberLight },
-  { value: 'combase',     label: 'COMBASE',           color: T.textSub },
-  { value: 'cemaa',       label: 'CEMAA',             color: T.red },
-  { value: 'admin',       label: 'Administrateur',    color: T.red },
-];
-
-const BASES_FAC = [
-  { id: 'BA101', code: 'BA101', nom: 'Base Aérienne 101 Yaoundé',    region: 'Centre' },
-  { id: 'BA201', code: 'BA201', nom: 'Base Aérienne 201 Douala',     region: 'Littoral' },
-  { id: 'BA301', code: 'BA301', nom: 'Base Aérienne 301 Garoua',     region: 'Nord' },
-  { id: 'BA401', code: 'BA401', nom: 'Base Aérienne 401 Maroua',     region: 'Extrême-Nord' },
-  { id: 'BA302', code: 'BA302', nom: 'Base Aérienne 302 Ngaoundéré', region: 'Adamaoua' },
-  { id: 'BA501', code: 'BA501', nom: 'Base Aérienne 501 Bamenda',  region: 'Nord-Ouest' },
-  { id: 'BA102', code: 'BA102', nom: 'Base Aérienne 102 Bertoua',    region: 'Est' },
-];
-
-const GRADES = [
-  'Général de Corps d\'Armée Aérienne', 'Général de Division Aérienne',
-  'Général de Brigade Aérienne', 'Colonel', 'Lieutenant-Colonel',
-  'Commandant', 'Capitaine', 'Lieutenant', 'Sous-Lieutenant',
-  'Adjudant-Chef', 'Adjudant', 'Sergent-Chef', 'Sergent', 'Caporal-Chef', 'Caporal',
-];
-
-// ─── Composants UI partagés ───────────────────────────────────────────────────
-function Card({ children, style={} }: { children: React.ReactNode; style?: React.CSSProperties }): React.ReactElement {
-  return <div style={{ background: T.bgCard, border: `1px solid ${T.border}`,
-    borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.06)', ...style }}>{children}</div>;
-}
-
-function Field({ label, value, onChange, type='text', required, options, placeholder, disabled }: {
-  label: string; value: string; onChange: (v: string) => void;
-  type?: string; required?: boolean; disabled?: boolean;
-  options?: { value: string; label: string }[];
-  placeholder?: string;
-}): React.ReactElement {
-  const [focused, setFocused] = useState(false);
-  const base: React.CSSProperties = {
-    width: '100%', padding: '9px 12px',
-    background: disabled ? T.bgAlt : (focused ? T.bgCard : T.bgInput),
-    border: `1px solid ${focused ? T.green : T.border}`, borderRadius: 6,
-    color: disabled ? T.textDim : T.text, fontSize: 13, outline: 'none',
-    boxSizing: 'border-box', transition: 'border-color 0.2s', fontFamily: T.body,
-    boxShadow: focused ? `0 0 0 3px ${T.green}20` : 'none',
-  };
-  return (
-    <div style={{ marginBottom: 14 }}>
-      <label style={{ display: 'block', fontSize: 11, fontWeight: 600,
-        color: T.textSub, marginBottom: 5 }}>
-        {label}{required && <span style={{ color: T.red, marginLeft: 3 }}>*</span>}
-      </label>
-      {options ? (
-        <select value={value} onChange={e => onChange(e.target.value)} disabled={disabled}
-          onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
-          style={{ ...base, appearance: 'none',
-            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%234a4540' stroke-width='1.5' fill='none'/%3E%3C/svg%3E")`,
-            backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center', paddingRight: 32 }}>
-          <option value="">— Sélectionner —</option>
-          {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
-      ) : (
-        <input type={type} value={value} onChange={e => onChange(e.target.value)}
-          placeholder={placeholder} disabled={disabled}
-          onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} style={base} />
-      )}
-    </div>
-  );
-}
-
-function Badge({ label, color }: { label: string; color: string }): React.ReactElement {
-  return (
-    <span style={{ fontSize: 10, fontWeight: 600, color, background: `${color}18`,
-      border: `1px solid ${color}40`, borderRadius: 4, padding: '2px 8px',
-      textTransform: 'uppercase', whiteSpace: 'nowrap', letterSpacing: '0.05em' }}>
-      {label}
-    </span>
-  );
-}
-
-function Modal({ title, onClose, children }: {
-  title: string; onClose: () => void; children: React.ReactNode;
-}): React.ReactElement {
-  return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)',
-      zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-      <div style={{ background: T.bgCard, borderRadius: 10, width: '100%', maxWidth: 560,
-        maxHeight: '90vh', overflow: 'auto',
-        boxShadow: '0 20px 60px rgba(0,0,0,0.15)', border: `1px solid ${T.border}` }}>
-        <div style={{ padding: '16px 24px', borderBottom: `1px solid ${T.border}`,
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          position: 'sticky', top: 0, background: T.bgCard, zIndex: 1 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: T.text }}>{title}</div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none',
-            fontSize: 20, cursor: 'pointer', color: T.textDim, lineHeight: 1 }}>×</button>
-        </div>
-        <div style={{ padding: '20px 24px' }}>{children}</div>
-      </div>
-    </div>
-  );
-}
-
-function StatMini({ label, value, color }: { label: string; value: number | string; color: string }): React.ReactElement {
-  return (
-    <div style={{ padding: '14px 18px', background: T.bgCard, border: `1px solid ${T.border}`,
-      borderRadius: 8, position: 'relative', overflow: 'hidden' }}>
-      <div style={{ fontSize: 10, color: T.textDim, textTransform: 'uppercase',
-        letterSpacing: '0.08em', marginBottom: 6 }}>{label}</div>
-      <div style={{ fontSize: 28, fontWeight: 700, color, fontFamily: T.display }}>{value}</div>
-      <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 3,
-        background: color, opacity: 0.25 }} />
-    </div>
-  );
-}
+// Constantes (ROLES, BASES_FAC, GRADES) et composants partagés (Card, Field,
+// Badge, Modal, StatMini) : voir admin.shared.tsx.
 
 // ─── Sous-navigation admin ────────────────────────────────────────────────────
 const ADMIN_TABS = [
   { key: 'utilisateurs', label: 'Utilisateurs',    icon: '👤' },
+  { key: 'interims',     label: 'Intérims',        icon: '⇌' },
+  { key: 'mouvements',   label: 'Mouvements',      icon: '⇄' },
   { key: 'bases',        label: 'Bases aériennes', icon: '🏛' },
+  { key: 'escadrons',    label: 'Escadrons',       icon: '◈' },
   { key: 'securite',     label: 'Sécurité MFA',    icon: '🛡' },
   { key: 'audit',        label: 'Journal d\'audit', icon: '📜' },
   { key: 'systeme',      label: 'Système',         icon: '⚙' },
@@ -160,6 +60,10 @@ function UtilisateursTab(): React.ReactElement {
   const [filterBase, setFilterBase] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editUser, setEditUser] = useState<Utilisateur | null>(null);
+  /** Filtre « comptes verrouillés uniquement ». */
+  const [seulVerrous, setSeulVerrous] = useState(false);
+  /** Compte dont on prépare le déverrouillage. */
+  const [aDebloquer, setADebloquer] = useState<Utilisateur | null>(null);
   const [form, setForm] = useState({
     nom: '', prenom: '', grade: '', login: '', role: '',
     base_id: '', password: '', confirm_password: '',
@@ -235,10 +139,13 @@ function UtilisateursTab(): React.ReactElement {
     } catch { toast.error('Erreur'); }
   };
 
+  const verrouilles = users.filter(u => u.verrouille_securite);
+
   const filtered = users.filter(u =>
     (!search || `${u.nom} ${u.prenom} ${u.login}`.toLowerCase().includes(search.toLowerCase())) &&
     (!filterRole || u.role === filterRole) &&
-    (!filterBase || u.base_id === filterBase)
+    (!filterBase || u.base_id === filterBase) &&
+    (!seulVerrous || u.verrouille_securite)
   );
 
   const roleInfo = (role: string) => ROLES.find(r => r.value === role);
@@ -246,12 +153,50 @@ function UtilisateursTab(): React.ReactElement {
   return (
     <div>
       {/* Stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 12, marginBottom: 20 }}>
         <StatMini label="Total utilisateurs" value={users.length} color={T.blue} />
         <StatMini label="Comptes actifs" value={users.filter(u => u.actif).length} color={T.green} />
         <StatMini label="Comptes inactifs" value={users.filter(u => !u.actif).length} color={T.red} />
-        <StatMini label="Bases couvertes" value={new Set(users.map(u => u.base_id)).size} color={T.amberLight} />
+        {/* Cliquable : c'est le chemin le plus court entre « il y a un problème »
+            et « voici les comptes concernés ». */}
+        <StatMini label="Comptes verrouillés" value={verrouilles.length} color={T.amberLight}
+                  actif={seulVerrous}
+                  onClick={() => setSeulVerrous(v => !v)} />
+        <StatMini label="Bases couvertes" value={new Set(users.map(u => u.base_id)).size} color={T.textSub} />
       </div>
+
+      {/* ── Bandeau d'alerte ────────────────────────────────────────────────
+          Sans lui, un compte verrouillé n'était visible que dans le journal
+          d'alertes de l'onglet Sécurité — il fallait penser à aller l'y
+          chercher. L'agent, lui, attend devant un écran de refus. */}
+      {verrouilles.length > 0 && !seulVerrous && (
+        <div className="ad-alerte" style={{
+          display: 'flex', alignItems: 'center', gap: 14, marginBottom: 18,
+          padding: '13px 18px', background: T.amberBg,
+          border: `1px solid ${T.amberBorder}`, borderLeft: `3px solid ${T.amberLight}`,
+          borderRadius: 8,
+        }}>
+          <span className="ad-pastille" style={{
+            width: 10, height: 10, borderRadius: '50%',
+            background: T.amberLight, color: T.amberLight, flexShrink: 0,
+          }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: T.amber }}>
+              {verrouilles.length === 1
+                ? '1 compte est verrouillé et son titulaire ne peut plus se connecter'
+                : `${verrouilles.length} comptes sont verrouillés et leurs titulaires ne peuvent plus se connecter`}
+            </div>
+            <div style={{ fontSize: 11.5, color: T.amber, marginTop: 4, lineHeight: 1.6 }}>
+              Le verrouillage est automatique après {MAX_ECHECS} échecs de connexion consécutifs.
+              Seul un administrateur peut le lever.
+            </div>
+          </div>
+          <button onClick={() => setSeulVerrous(true)} className="ad-btn ad-btn-lift" style={{
+            padding: '8px 16px', background: T.amberLight, border: 'none', borderRadius: 6,
+            color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+          }}>Voir les comptes</button>
+        </div>
+      )}
 
       <Card>
         {/* Barre d'outils */}
@@ -274,8 +219,20 @@ function UtilisateursTab(): React.ReactElement {
             <option value="">Toutes les bases</option>
             {BASES_FAC.map(b => <option key={b.id} value={b.id}>{b.code}</option>)}
           </select>
-          <button onClick={openCreate} style={{ padding: '8px 18px', background: T.green,
-            border: 'none', borderRadius: 6, color: '#fff', fontSize: 13,
+          <button onClick={() => setSeulVerrous(v => !v)} className="ad-btn"
+            aria-pressed={seulVerrous} style={{
+              padding: '8px 14px',
+              background: seulVerrous ? T.amberBg : T.bgInput,
+              border: `1px solid ${seulVerrous ? T.amberBorder : T.border}`,
+              borderRadius: 6, color: seulVerrous ? T.amber : T.textDim,
+              fontSize: 12, fontWeight: seulVerrous ? 600 : 400, cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', gap: 7,
+            }}>
+            <span className={seulVerrous ? 'ad-cadenas' : undefined}>🔒</span>
+            Verrouillés ({verrouilles.length})
+          </button>
+          <button onClick={openCreate} className="ad-btn ad-btn-lift" style={{ padding: '8px 18px',
+            background: T.green, border: 'none', borderRadius: 6, color: '#fff', fontSize: 13,
             fontWeight: 600, cursor: 'pointer' }}>
             + Nouvel utilisateur
           </button>
@@ -291,21 +248,29 @@ function UtilisateursTab(): React.ReactElement {
         ) : (
           <div>
             <div style={{ display: 'grid',
-              gridTemplateColumns: '1fr 140px 100px 120px 80px 100px',
+              gridTemplateColumns: '1fr 130px 100px 90px 76px 130px 180px',
+              gap: 8,
               padding: '8px 20px', fontSize: 10, fontWeight: 600, color: T.textDim,
               textTransform: 'uppercase', letterSpacing: '0.08em',
               borderBottom: `1px solid ${T.border}` }}>
               <span>Nom / Prénom</span><span>Login</span><span>Rôle</span>
-              <span>Base</span><span>Statut</span>
+              <span>Base</span><span>Statut</span><span>Sécurité</span>
               <span style={{ textAlign: 'right' }}>Actions</span>
             </div>
-            {filtered.map(u => {
+            {filtered.map((u, n) => {
               const ri = roleInfo(u.role);
+              const verrou = Boolean(u.verrouille_securite);
+              const echecs = u.nb_echecs_connexion ?? 0;
               return (
-                <div key={u.id} style={{ display: 'grid',
-                  gridTemplateColumns: '1fr 140px 100px 120px 80px 100px',
+                <div key={u.id} className="ad-row ad-row-hover" style={{
+                  '--ad-i': n,
+                  color: verrou ? T.amberLight : 'transparent',
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 130px 100px 90px 76px 130px 180px',
+                  gap: 8,
                   padding: '12px 20px', borderBottom: `1px solid ${T.border}`,
-                  alignItems: 'center', opacity: u.actif ? 1 : 0.5 }}>
+                  background: verrou ? T.amberBg : undefined,
+                  alignItems: 'center', opacity: u.actif ? 1 : 0.5 } as React.CSSProperties}>
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>
                       {u.grade && <span style={{ fontSize: 11, color: T.textDim, marginRight: 6 }}>{u.grade}</span>}
@@ -328,13 +293,49 @@ function UtilisateursTab(): React.ReactElement {
                     color: u.actif ? T.green : T.red }}>
                     {u.actif ? '● Actif' : '○ Inactif'}
                   </span>
+
+                  {/* ── Colonne Sécurité ──
+                      Trois états seulement : verrouillé, échecs en cours, rien.
+                      Un compte sain n'affiche rien — l'absence de signal EST
+                      l'information, et la colonne reste lisible d'un coup d'œil. */}
+                  <span style={{ fontSize: 10.5 }}>
+                    {verrou ? (
+                      <span title={u.motif_verrouillage ?? 'Compte verrouillé'}
+                        style={{ color: T.amber, fontWeight: 700,
+                                 display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                        <span className="ad-cadenas">🔒</span> Verrouillé
+                      </span>
+                    ) : echecs > 0 ? (
+                      <span title={`${echecs} échec(s) consécutif(s) — verrouillage au ${MAX_ECHECS}ᵉ`}
+                        style={{ color: T.amberLight, display: 'inline-flex',
+                                 alignItems: 'center', gap: 6 }}>
+                        <span className="ad-jauge">
+                          {Array.from({ length: MAX_ECHECS }, (_, k) => (
+                            <i key={k} data-on={k < echecs ? '1' : '0'} />
+                          ))}
+                        </span>
+                        {echecs}/{MAX_ECHECS}
+                      </span>
+                    ) : (
+                      <span style={{ color: T.textMute }}>—</span>
+                    )}
+                  </span>
+
                   <div style={{ display: 'flex', gap: 5, justifyContent: 'flex-end' }}>
-                    <button onClick={() => openEdit(u)} style={{ padding: '4px 10px',
+                    {verrou && (
+                      <button onClick={() => setADebloquer(u)} className="ad-btn ad-btn-lift"
+                        style={{ padding: '4px 10px', background: T.amberLight,
+                          border: 'none', borderRadius: 4, color: '#fff',
+                          fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
+                        Déverrouiller
+                      </button>
+                    )}
+                    <button onClick={() => openEdit(u)} className="ad-btn" style={{ padding: '4px 10px',
                       background: T.blueBg, border: `1px solid ${T.blueBorder}`,
                       borderRadius: 4, color: T.blue, fontSize: 11, cursor: 'pointer' }}>
                       Modifier
                     </button>
-                    <button onClick={() => handleToggleActif(u)} style={{ padding: '4px 10px',
+                    <button onClick={() => handleToggleActif(u)} className="ad-btn" style={{ padding: '4px 10px',
                       background: u.actif ? T.redBg : T.greenBg,
                       border: `1px solid ${u.actif ? T.redBorder : T.greenBorder}`,
                       borderRadius: 4, color: u.actif ? T.red : T.green,
@@ -348,6 +349,15 @@ function UtilisateursTab(): React.ReactElement {
           </div>
         )}
       </Card>
+
+      {/* Fenêtre de déverrouillage */}
+      {aDebloquer && (
+        <ModaleDeverrouillage
+          user={aDebloquer}
+          onFermer={() => setADebloquer(null)}
+          onFait={() => { setADebloquer(null); fetchUsers(); }}
+        />
+      )}
 
       {/* Modal créer/modifier utilisateur */}
       {showModal && (
@@ -401,6 +411,108 @@ function UtilisateursTab(): React.ReactElement {
         </Modal>
       )}
     </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   DÉVERROUILLAGE D'UN COMPTE
+   ───────────────────────────────────────────────────────────────────────────
+   POST /auth/admin/utilisateurs/:id/deverrouiller  { motif? }
+
+   Le service remet `verrouille_securite` à faux, efface le motif et RAZ le
+   compteur d'échecs, puis journalise un COMPTE_DEVERROUILLE de niveau INFO.
+   L'agent peut se reconnecter aussitôt avec son mot de passe habituel : le
+   verrouillage ne l'a pas changé.
+
+   Le motif est facultatif côté serveur. L'écran le demande quand même, parce
+   qu'il atterrit dans le journal de sécurité et qu'un déverrouillage sans
+   explication est exactement ce qu'un audit vous reprochera.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function ModaleDeverrouillage({ user, onFermer, onFait }: {
+  user: Utilisateur; onFermer: () => void; onFait: () => void;
+}): React.ReactElement {
+  const [motif, setMotif] = useState('');
+  const [envoi, setEnvoi] = useState(false);
+
+  const debloquer = async (): Promise<void> => {
+    setEnvoi(true);
+    try {
+      await api.post(`/auth/admin/utilisateurs/${user.id}/deverrouiller`,
+        motif.trim() ? { motif: motif.trim() } : {});
+      toast.success(`Compte de ${user.nom} ${user.prenom} déverrouillé`);
+      onFait();
+    } catch (e) {
+      toast.error(messageErreur(e, 'Le déverrouillage a échoué'));
+    } finally { setEnvoi(false); }
+  };
+
+  return (
+    <Modal title="Déverrouiller le compte" onClose={onFermer} largeur={540}>
+      <div style={{
+        padding: '13px 16px', background: T.bgAlt, border: `1px solid ${T.border}`,
+        borderRadius: 6, marginBottom: 16, fontSize: 12.5, lineHeight: 1.7, color: T.textSub,
+      }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: T.text, marginBottom: 8 }}>
+          {user.grade ? user.grade + ' ' : ''}{user.nom} {user.prenom}
+        </div>
+        <div style={{ fontFamily: T.mono, fontSize: 11.5, color: T.textDim }}>{user.login}</div>
+        {user.motif_verrouillage && (
+          <div style={{
+            marginTop: 11, paddingTop: 10, borderTop: `1px dashed ${T.border}`,
+            fontSize: 11.5,
+          }}>
+            <span style={{ textTransform: 'uppercase', letterSpacing: '0.07em',
+                           fontSize: 9.5, color: T.textDim }}>Motif du verrouillage</span>
+            <div style={{ marginTop: 4, color: T.amber }}>{user.motif_verrouillage}</div>
+          </div>
+        )}
+        {user.last_login && (
+          <div style={{ marginTop: 8, fontSize: 11, color: T.textDim }}>
+            Dernière connexion réussie : {dateFr(user.last_login, true)}
+          </div>
+        )}
+      </div>
+
+      <div style={{
+        padding: '11px 14px', background: T.greenBg, border: `1px solid ${T.greenBorder}`,
+        borderRadius: 6, fontSize: 11.5, color: T.green, marginBottom: 16, lineHeight: 1.65,
+      }}>
+        Après déverrouillage, l&apos;agent se reconnecte avec <strong>son mot de passe
+        habituel</strong> : le verrouillage ne l&apos;a pas modifié. Le compteur d&apos;échecs
+        est remis à zéro.
+        <br />
+        Si l&apos;agent a réellement oublié son mot de passe, déverrouillez puis
+        utilisez « Modifier » pour lui en attribuer un nouveau. Si c&apos;est son second
+        facteur qui est en cause, passez par l&apos;onglet Sécurité MFA.
+      </div>
+
+      <Field label="Motif du déverrouillage" value={motif} onChange={setMotif}
+             type="textarea"
+             placeholder="Identité vérifiée par téléphone, demande du chef de service…"
+             aide="Facultatif, mais consigné au journal de sécurité. Un déverrouillage sans motif est difficile à justifier en audit." />
+
+      <div style={{
+        padding: '11px 14px', background: T.amberBg, border: `1px solid ${T.amberBorder}`,
+        borderRadius: 6, fontSize: 11, color: T.amber, marginBottom: 16, lineHeight: 1.6,
+      }}>
+        Assurez-vous d&apos;avoir identifié l&apos;agent par un canal indépendant avant de
+        lever le verrou : trois échecs consécutifs peuvent aussi être une tentative
+        d&apos;intrusion, auquel cas il vaut mieux laisser le compte fermé.
+      </div>
+
+      <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+        <button onClick={onFermer} className="ad-btn" style={{
+          padding: '9px 20px', background: T.bgAlt, border: `1px solid ${T.border}`,
+          borderRadius: 6, color: T.textSub, fontSize: 13, cursor: 'pointer',
+        }}>Annuler</button>
+        <button onClick={debloquer} disabled={envoi} className="ad-btn ad-btn-lift" style={{
+          padding: '9px 24px', background: envoi ? T.textMute : T.amberLight,
+          border: 'none', borderRadius: 6, color: '#fff', fontSize: 13, fontWeight: 600,
+          cursor: envoi ? 'not-allowed' : 'pointer',
+        }}>{envoi ? 'Déverrouillage…' : 'Déverrouiller le compte'}</button>
+      </div>
+    </Modal>
   );
 }
 
@@ -1014,7 +1126,10 @@ export default function AdminPage(): React.ReactElement {
 
       {/* Contenu */}
       {activeTab === 'utilisateurs' && <UtilisateursTab />}
+      {activeTab === 'interims' && <InterimTab />}
+      {activeTab === 'mouvements' && <MouvementsTab />}
       {activeTab === 'bases' && <BasesTab />}
+      {activeTab === 'escadrons' && <EscadronsTab />}
       {activeTab === 'securite' && <SecuriteMfaTab />}
       {activeTab === 'audit' && <AuditTab />}
       {activeTab === 'systeme' && <SystemeTab />}

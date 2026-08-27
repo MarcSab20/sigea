@@ -1,0 +1,201 @@
+/* ===========================================================================
+   apps/frontend/src/components/cameroon-map.css
+   ---------------------------------------------------------------------------
+   Carte de situation opérationnelle.
+
+   Toutes les animations reposent sur `transform`, `opacity` et
+   `stroke-dashoffset` — aucune ne déclenche de recalcul de mise en page.
+   La carte tourne en permanence sur un écran de veille : c'est la contrainte
+   qui a dicté ces choix.
+
+   Portée : tout est préfixé `.cm-`.
+   =========================================================================== */
+
+.cm-root {
+  --cm-out: cubic-bezier(0.23, 1, 0.32, 1);
+  position: relative;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   1 · RÉGIONS
+   Elles montent à l'apparition, en cascade. Une région qui porte une base
+   active se teinte un peu plus.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.cm-region {
+  transform-box: fill-box;
+  transform-origin: center;
+  opacity: 0;
+  transform: translateY(7px);
+  transition:
+    opacity   .6s var(--cm-out) var(--cm-d, 0ms),
+    transform .6s var(--cm-out) var(--cm-d, 0ms),
+    fill      .3s ease,
+    stroke    .3s ease;
+}
+.cm-root.is-in .cm-region { opacity: 1; transform: none; }
+.cm-region[data-on='1'] { stroke-width: 1.8; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   2 · LIAISONS ACTIVES
+   ───────────────────────────────────────────────────────────────────────
+   Un TIRET COURT parcourt l'arc de départ vers arrivée. Volontairement pas
+   une icône d'aéronef : un avion dessiné à un point de la carte se lit comme
+   « l'appareil est ici », ce qui serait faux — aucune position n'est mesurée.
+   Un flux qui circule se lit comme « cette liaison est en cours », ce qui est
+   exact et vérifiable.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* Trait de fond : la route elle-même. */
+.cm-route {
+  fill: none;
+  stroke-linecap: round;
+  transition: opacity .3s ease, stroke-width .3s ease;
+}
+
+/* Tracé progressif à l'apparition. */
+.cm-route--trace {
+  stroke-dasharray: 1600;
+  stroke-dashoffset: 1600;
+  transition: stroke-dashoffset 1.4s var(--cm-out) var(--cm-d, 0ms), opacity .3s ease;
+}
+.cm-root.is-in .cm-route--trace { stroke-dashoffset: 0; }
+
+/* Le flux : un tiret court sur un très long vide. */
+.cm-flux {
+  fill: none;
+  stroke-linecap: round;
+  stroke-dasharray: 14 320;
+  animation: cmFlux var(--cm-dur, 6s) linear infinite;
+  animation-delay: var(--cm-d, 0ms);
+}
+@keyframes cmFlux { to { stroke-dashoffset: -334; } }
+
+.cm-lien { transition: opacity .28s ease; }
+.cm-lien[data-dim='1'] { opacity: .14; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   3 · BASES
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.cm-base { cursor: pointer; }
+
+.cm-base__halo {
+  fill: none;
+  transform-box: fill-box; transform-origin: center;
+  opacity: 0; transform: scale(.65);
+  transition: opacity .22s ease, transform .22s var(--cm-out);
+}
+.cm-base[data-on='1'] .cm-base__halo { opacity: .85; transform: scale(1); }
+
+.cm-base__pt {
+  transform-box: fill-box; transform-origin: center;
+  transition: transform .22s var(--cm-out), fill .25s ease;
+}
+.cm-base[data-on='1'] .cm-base__pt { transform: scale(1.32); }
+
+.cm-base__txt {
+  transition: fill .22s ease, font-weight .22s ease;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Onde d'activité : émise seulement par une base dont une liaison part ou
+   arrive. Une base au repos ne clignote pas — l'absence de signal EST
+   l'information. */
+.cm-onde {
+  fill: none;
+  transform-box: fill-box; transform-origin: center;
+  animation: cmOnde 3.2s var(--cm-out) infinite;
+  animation-delay: var(--cm-d, 0ms);
+  opacity: 0;
+}
+@keyframes cmOnde {
+  0%   { transform: scale(.55); opacity: .7; }
+  70%  { transform: scale(2.3); opacity: 0; }
+  100% { transform: scale(2.3); opacity: 0; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   4 · PANNEAU LATÉRAL
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.cm-fiche { animation: cmFiche .3s var(--cm-out) both; }
+@keyframes cmFiche {
+  from { opacity: 0; transform: translate3d(0, 10px, 0); }
+  to   { opacity: 1; transform: none; }
+}
+
+.cm-item {
+  animation: cmItem .34s var(--cm-out) both;
+  animation-delay: calc(min(var(--cm-i, 0), 10) * 34ms);
+  transition: background-color .18s ease, border-color .18s ease,
+              transform .18s var(--cm-out);
+}
+@keyframes cmItem {
+  from { opacity: 0; transform: translate3d(-8px, 0, 0); }
+  to   { opacity: 1; transform: none; }
+}
+@media (hover: hover) and (pointer: fine) {
+  .cm-item:hover { transform: translateX(3px); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   5 · ÉTAT DE LA SOURCE
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.cm-voyant {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  position: relative; flex-shrink: 0;
+}
+.cm-voyant[data-live='1']::after {
+  content: ''; position: absolute; inset: -3px; border-radius: 50%;
+  border: 1.5px solid currentColor;
+  animation: cmOnde 2.2s var(--cm-out) infinite;
+}
+
+/* Barre de fraîcheur : elle se vide entre deux rafraîchissements. On voit
+   quand la prochaine mise à jour arrive au lieu de la subir. */
+.cm-fraicheur {
+  height: 2px; border-radius: 2px; overflow: hidden;
+}
+.cm-fraicheur > i {
+  display: block; height: 100%; transform-origin: left;
+  animation: cmFraicheur var(--cm-periode, 30s) linear infinite;
+}
+@keyframes cmFraicheur {
+  from { transform: scaleX(1); }
+  to   { transform: scaleX(0); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   6 · APPAREILS TÉLÉMÉTRÉS
+   Ces règles ne servent QUE si une source de positions réelle est branchée
+   (prop `sourcePositions`). Sans source, aucun de ces éléments n'est rendu.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.cm-aeronef { transition: transform .9s linear; }
+.cm-aeronef__glyphe { transform-box: fill-box; transform-origin: center; }
+.cm-aeronef__trace { fill: none; stroke-dasharray: 3 5; opacity: .5; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   7 · MOUVEMENT RÉDUIT
+   ═══════════════════════════════════════════════════════════════════════ */
+
+@media (prefers-reduced-motion: reduce) {
+  .cm-root *, .cm-root *::before, .cm-root *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0ms !important;
+    transition-duration: .16s !important;
+    transition-delay: 0ms !important;
+  }
+  .cm-region { opacity: 1; transform: none; }
+  .cm-route--trace { stroke-dashoffset: 0; }
+  .cm-flux, .cm-onde, .cm-fraicheur > i { animation: none !important; }
+  .cm-onde, .cm-voyant[data-live='1']::after { opacity: 0 !important; }
+  /* Le flux disparaît : la couleur de la route porte alors seule
+     l'information « liaison active ». */
+  .cm-flux { display: none; }
+  .cm-fiche, .cm-item { transform: none; }
+}
