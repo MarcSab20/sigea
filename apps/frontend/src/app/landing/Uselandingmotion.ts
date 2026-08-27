@@ -190,43 +190,6 @@ export function useCompteur(cible: number, actif: boolean, duree = 1100): number
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
-   Séquence ordonnée (pose des tampons du héros)
-   Renvoie l'index de la dernière étape jouée. `rejouer()` remet à zéro.
-   ───────────────────────────────────────────────────────────────────────── */
-
-export function useSequence(
-  nb: number,
-  options?: { actif?: boolean; intervalle?: number; retard?: number },
-): { index: number; rejouer: () => void; termine: boolean } {
-  const { actif = true, intervalle = 620, retard = 700 } = options ?? {};
-  const [index, setIndex] = useState(-1);
-  const [cycle, setCycle] = useState(0);
-  const reduit = useMouvementReduit();
-
-  useEffect(() => {
-    if (!actif) return;
-    if (reduit) { setIndex(nb - 1); return; }
-
-    setIndex(-1);
-    const minuteurs: number[] = [];
-
-    for (let i = 0; i < nb; i += 1) {
-      minuteurs.push(
-        window.setTimeout(() => setIndex(i), retard + i * intervalle),
-      );
-    }
-
-    return () => minuteurs.forEach(window.clearTimeout);
-  }, [nb, actif, intervalle, retard, reduit, cycle]);
-
-  return {
-    index,
-    rejouer: () => setCycle((c) => c + 1),
-    termine: index >= nb - 1,
-  };
-}
-
-/* ─────────────────────────────────────────────────────────────────────────
    Frappe progressive d'une chaîne (l'empreinte du document)
    ───────────────────────────────────────────────────────────────────────── */
 
@@ -249,4 +212,156 @@ export function useFrappe(texte: string, actif: boolean, cadence = 14): string {
   }, [texte, actif, cadence, reduit]);
 
   return rendu;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Cycle du manifeste — machine à phases, en boucle
+   ─────────────────────────────────────────────────────────────────────────
+   pose    : les tampons s'apposent, un par un
+   lecture : le document est complet, on laisse le temps de lire
+   sortie  : la feuille part au classement (glisse + bascule)
+   entree  : la feuille suivante remonte du sous-main
+   → retour à `pose`, avec un nouveau spécimen.
+
+   Un seul minuteur vivant à la fois : pas de cascade de setTimeout qui se
+   chevauchent si l'onglet passe en arrière-plan.
+   ───────────────────────────────────────────────────────────────────────── */
+
+export type PhaseManifeste = 'pose' | 'lecture' | 'sortie' | 'entree';
+
+export interface Cycle {
+  phase: PhaseManifeste;
+  /** Index du dernier tampon apposé (−1 = aucun). */
+  pose: number;
+  /** Numéro de tour — sert de clé de remontage au document. */
+  tour: number;
+  /** Vrai dès que tous les tampons sont posés. */
+  complet: boolean;
+}
+
+export function useCycleManifeste(
+  nbTampons: number,
+  options?: {
+    actif?: boolean;
+    /** Intervalle entre deux tampons. */
+    cadence?: number;
+    /** Attente avant le premier tampon. */
+    amorce?: number;
+    /** Temps de lecture, document complet. */
+    lecture?: number;
+    /** Durées de la transition de feuille — doivent rester alignées sur le CSS. */
+    sortie?: number;
+    entree?: number;
+  },
+): Cycle {
+  const {
+    actif = true, cadence = 950, amorce = 900,
+    lecture = 4200, sortie = 800, entree = 700,
+  } = options ?? {};
+
+  const reduit = useMouvementReduit();
+  const [etat, setEtat] = useState<Cycle>({ phase: 'pose', pose: -1, tour: 0, complet: false });
+
+  useEffect(() => {
+    // Mouvement réduit : état final, pas de boucle. La page reste informative
+    // sans jamais rien mettre en mouvement.
+    if (reduit) {
+      setEtat({ phase: 'lecture', pose: nbTampons - 1, tour: 0, complet: true });
+      return;
+    }
+    if (!actif) return;
+
+    let vivant = true;
+    let minuteur = 0;
+
+    const attendre = (ms: number, suite: () => void): void => {
+      minuteur = window.setTimeout(() => { if (vivant) suite(); }, ms);
+    };
+
+    const demarrerTour = (tour: number): void => {
+      setEtat({ phase: 'pose', pose: -1, tour, complet: false });
+
+      const poser = (i: number): void => {
+        attendre(i === 0 ? amorce : cadence, () => {
+          setEtat((e) => ({ ...e, pose: i, complet: i >= nbTampons - 1 }));
+          if (i < nbTampons - 1) poser(i + 1);
+          else lire(tour);
+        });
+      };
+
+      const lire = (t: number): void => {
+        setEtat((e) => ({ ...e, phase: 'lecture' }));
+        attendre(lecture, () => {
+          setEtat((e) => ({ ...e, phase: 'sortie' }));
+          attendre(sortie, () => {
+            setEtat({ phase: 'entree', pose: -1, tour: t + 1, complet: false });
+            attendre(entree, () => demarrerTour(t + 1));
+          });
+        });
+      };
+
+      poser(0);
+    };
+
+    demarrerTour(0);
+
+    return () => { vivant = false; window.clearTimeout(minuteur); };
+  }, [nbTampons, actif, cadence, amorce, lecture, sortie, entree, reduit]);
+
+  return etat;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Fenêtre modale : verrou de défilement, fermeture par Échap, restitution du
+   focus à l'élément qui l'a ouverte.
+   ───────────────────────────────────────────────────────────────────────── */
+
+export function useModale(ouverte: boolean, fermer: () => void): React.RefObject<HTMLDivElement> {
+  const panneau = useRef<HTMLDivElement>(null);
+  const declencheur = useRef<Element | null>(null);
+
+  useEffect(() => {
+    if (!ouverte) return;
+
+    declencheur.current = document.activeElement;
+
+    // Le verrou compense la largeur de la barre de défilement : sans cela, la
+    // page saute latéralement à l'ouverture.
+    const marge = window.innerWidth - document.documentElement.clientWidth;
+    const overflow = document.body.style.overflow;
+    const padding = document.body.style.paddingRight;
+    document.body.style.overflow = 'hidden';
+    if (marge > 0) document.body.style.paddingRight = `${marge}px`;
+
+    const auClavier = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') { e.stopPropagation(); fermer(); return; }
+      if (e.key !== 'Tab') return;
+
+      const cible = panneau.current;
+      if (!cible) return;
+      const focusables = cible.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusables.length === 0) return;
+      const premier = focusables[0];
+      const dernier = focusables[focusables.length - 1];
+
+      if (e.shiftKey && document.activeElement === premier) { e.preventDefault(); dernier.focus(); }
+      else if (!e.shiftKey && document.activeElement === dernier) { e.preventDefault(); premier.focus(); }
+    };
+
+    document.addEventListener('keydown', auClavier);
+    // Une frame d'attente : le panneau doit être monté pour recevoir le focus.
+    const f = requestAnimationFrame(() => panneau.current?.focus());
+
+    return () => {
+      document.removeEventListener('keydown', auClavier);
+      cancelAnimationFrame(f);
+      document.body.style.overflow = overflow;
+      document.body.style.paddingRight = padding;
+      (declencheur.current as HTMLElement | null)?.focus?.();
+    };
+  }, [ouverte, fermer]);
+
+  return panneau;
 }
