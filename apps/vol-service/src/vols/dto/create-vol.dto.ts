@@ -1,17 +1,30 @@
 // apps/vol-service/src/vols/dto/create-vol.dto.ts
+//
+// Évolution par rapport au lot 1 : `combord_id` devient OBLIGATOIRE.
+//
+// Sans compte rattaché, personne ne peut apposer le visa final et le dossier
+// s'arrête définitivement à l'arrêté du commandant de base. Un avertissement au
+// log ne suffisait pas : il laissait créer des vols structurellement incapables
+// d'aboutir, et le défaut n'apparaissait qu'au dernier moment, devant l'appareil.
+
 import {
   IsString, IsDateString, IsEnum, IsInt, IsOptional, IsArray,
-  IsNumber, ValidateNested, MinLength, Min, ArrayMaxSize, Matches,
+  IsNumber, ValidateNested, MinLength, Min, ArrayMinSize, ArrayMaxSize, Matches, IsUUID,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { TypeMission } from '@sigea/shared-types';
 
-export class EscaleCapaciteDto {
-  // NB : les identifiants de base sont des codes métier ("BA101"), pas des
-  // UUID — le seed les impose comme clé primaire. Pas de @IsUUID() ici.
-  @IsString() base_id!: string;
-  @IsInt() @Min(0) capacite_places!: number;
-  @IsNumber() @Min(0) capacite_cargo_kg!: number;
+/**
+ * Point de l'itinéraire APRÈS le départ.
+ * Le point de départ n'est pas listé : il est imposé par le serveur.
+ * Le dernier élément du tableau est la destination finale.
+ */
+export class PointItineraireDto {
+  @IsString() @MinLength(1)
+  base_id!: string;
+
+  @IsOptional() @IsDateString() heure_arrivee?: string;
+  @IsOptional() @IsDateString() heure_depart?:  string;
 }
 
 export class CreateVolDto {
@@ -24,35 +37,40 @@ export class CreateVolDto {
   @IsString() immatriculation!: string;
   @IsDateString() date_heure!: string;
 
-  /**
-   * Base de départ — IGNORÉE si elle est transmise.
-   *
-   * Le service impose la base d'affectation du créateur (COMBASE ou COMGMO) :
-   * un commandant de base ne planifie pas un vol au départ d'une autre base.
-   * Le champ reste optionnel dans le DTO pour ne pas casser les appels
-   * existants ni les tests end-to-end, mais sa valeur n'est jamais retenue.
-   *
-   * L'administrateur fait exception : lui seul peut désigner une base de
-   * départ, précisément parce qu'il n'a pas de périmètre opérationnel propre.
-   */
-  @IsOptional() @IsString() base_depart_id?: string;
-
-  @IsString() base_arrivee_id!: string;
   @IsEnum(TypeMission) type_mission!: TypeMission;
-  @IsInt() @Min(0) capacite_places!: number;
+
+  /** Plafond absolu que le SCOPS ne pourra pas dépasser en allouant. */
+  @IsInt() @Min(1) capacite_places!: number;
   @IsNumber() @Min(0) capacite_cargo_kg!: number;
 
-  // ── Commandant de bord : figé sur le vol, alimente le tampon COMBORD ──
+  // ── Commandant de bord ──
+  /**
+   * Compte SIGEA du commandant de bord. OBLIGATOIRE.
+   * Le service vérifie en outre que ce compte porte bien le rôle `combord` et
+   * qu'il est actif : un identifiant valide mais rattaché à un autre rôle
+   * produirait le même blocage, plus tard et plus difficile à diagnostiquer.
+   */
+  @IsUUID() combord_id!: string;
+
   @IsString() @MinLength(2) combord_grade!: string;
   @IsString() @MinLength(2) combord_nom!: string;
   @IsString() @MinLength(2) combord_prenom!: string;
 
-  // ── Escales intermédiaires, dans l'ordre de la route ──
-  // L'ordre du tableau fait foi : il est matérialisé en EscaleVol.ordre.
-  @IsOptional()
+  /** Obligatoire côté service lorsque le créateur est COMEA. */
+  @IsOptional() @IsUUID() escadron_id?: string;
+
+  /**
+   * Itinéraire, départ exclu, dans l'ordre de la route.
+   *
+   * Exemple de la directive — un COMBASE de Yaoundé déclarant
+   * Yaoundé → Douala → Garoua → Douala → Yaoundé transmet :
+   *   [ Douala, Garoua, Douala, Yaoundé ]
+   * Les répétitions sont ADMISES : c'est le cas nominal de l'aller-retour.
+   */
   @IsArray()
-  @ArrayMaxSize(10)
+  @ArrayMinSize(1, { message: "L'itinéraire doit comporter au moins une destination" })
+  @ArrayMaxSize(12)
   @ValidateNested({ each: true })
-  @Type(() => EscaleCapaciteDto)
-  escales?: EscaleCapaciteDto[];
+  @Type(() => PointItineraireDto)
+  itineraire!: PointItineraireDto[];
 }

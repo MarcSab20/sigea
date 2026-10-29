@@ -2,26 +2,35 @@
 //
 // Déclenche l'archivage à la clôture du circuit.
 //
+// ═══════════════════════════════════════════════════════════════════════════
+// CE QUI CHANGE
+// ═══════════════════════════════════════════════════════════════════════════
+// L'évènement écouté n'est plus `manifeste.completed` mais `liste.cloturee` :
+// la clôture est prononcée par le visa du commandant de bord sur la liste, et
+// c'est elle qui rend le manifeste définitif. Le `manifeste_id` est toujours
+// porté par la charge utile — c'est lui qui est archivé.
+//
 // ── Pourquoi un consumer d'évènement, et non un appel direct ──
-// La state machine publie MANIFESTE_COMPLETED. Elle pourrait appeler le
-// pdf-service en HTTP, mais l'archivage ne doit JAMAIS faire échouer une
-// signature : si Chromium est indisponible, le COMBORD doit pouvoir signer
-// quand même, et l'archive être produite plus tard. Le découplage par file
-// donne exactement cette propriété — et le nack en dead-letter conserve la
-// trace des archivages ratés au lieu de les perdre.
+// L'archivage ne doit JAMAIS faire échouer une signature. Si Chromium est
+// indisponible, le commandant de bord doit pouvoir viser quand même, et
+// l'archive être produite plus tard. Le découplage par file donne exactement
+// cette propriété — et le nack en dead-letter conserve la trace des archivages
+// ratés au lieu de les perdre.
 
 import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
 import * as amqp from 'amqplib';
-import { EVENTS } from '@sigea/shared-events';
+import { LISTE_EVENTS } from '@sigea/shared-events';
 import { SIGEA_EXCHANGE } from '@sigea/shared-messaging';
 import { ArchiveService } from './archive.service';
 
 const QUEUE_ARCHIVES = 'sigea.pdf.archives';
 
-interface CompletedEvent {
+interface ClotureEvent {
+  liste_id?:     string;
   manifeste_id?: string;
-  vol_id?: string;
-  base_id?: string;
+  vol_id?:       string;
+  base_id?:      string;
+  combord_id?:   string;
 }
 
 @Injectable()
@@ -45,7 +54,8 @@ export class ArchiveConsumer implements OnModuleInit, OnModuleDestroy {
       await this.channel?.close();
       await this.connection?.close();
     } catch {
-      // fermeture best-effort
+      // Fermeture best-effort : un conteneur qui s'arrête n'a pas à échouer
+      // parce qu'une socket était déjà tombée.
     }
   }
 
@@ -68,21 +78,32 @@ export class ArchiveConsumer implements OnModuleInit, OnModuleDestroy {
 
       await channel.assertExchange(SIGEA_EXCHANGE, 'topic', { durable: true });
       await channel.assertQueue(QUEUE_ARCHIVES, { durable: true });
-      await channel.bindQueue(QUEUE_ARCHIVES, SIGEA_EXCHANGE, EVENTS.MANIFESTE_COMPLETED);
+      await channel.bindQueue(QUEUE_ARCHIVES, SIGEA_EXCHANGE, LISTE_EVENTS.LISTE_CLOTUREE);
 
-      // prefetch=2 et non 10 : chaque archivage lance un rendu Chromium, gourmand
-      // en mémoire. Dix rendus concurrents satureraient le conteneur. La file
-      // absorbe les pointes, c'est son rôle.
+      // prefetch=2 et non 10 : chaque archivage lance un rendu Chromium,
+      // gourmand en mémoire. Dix rendus concurrents satureraient le conteneur.
+      // La file absorbe les pointes, c'est son rôle.
       await channel.prefetch(2);
 
       await channel.consume(QUEUE_ARCHIVES, (msg) => {
         if (!msg) return;
-        const payload = JSON.parse(msg.content.toString()) as CompletedEvent;
+
+        let payload: ClotureEvent;
+        try {
+          payload = JSON.parse(msg.content.toString()) as ClotureEvent;
+        } catch {
+          // Message illisible : il ne le deviendra pas en le rejouant.
+          this.logger.error('Message de clôture illisible — mis en dead-letter');
+          this.channel?.nack(msg, false, false);
+          return;
+        }
+
         if (!payload.manifeste_id) {
           this.logger.warn('Évènement de clôture sans manifeste_id — ignoré');
           this.channel?.ack(msg);
           return;
         }
+
         void this.archives
           .archiver(payload.manifeste_id)
           .then(() => this.channel?.ack(msg))
@@ -91,8 +112,8 @@ export class ArchiveConsumer implements OnModuleInit, OnModuleDestroy {
               `Archivage échoué pour ${payload.manifeste_id} : ${(e as Error).message}`,
             );
             // requeue=false : un message empoisonné part en dead-letter plutôt
-            // que de boucler. L'archive manquante reste rattrapable — voir la
-            // commande de rattrapage dans le README du lot.
+            // que de boucler. L'archive manquante reste rattrapable par
+            // l'endpoint de régénération exposé par ArchiveController.
             this.channel?.nack(msg, false, false);
           });
       });

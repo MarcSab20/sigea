@@ -29,6 +29,11 @@ export class PersonnelsService {
         role: true, base_id: true, actif: true, email: true,
         last_login_at: true, createdAt: true,
 
+        // Rattachement d'escadron : sans lui, le formulaire de modification
+        // d'un COMEA ne peut pas préremplir son escadron, et un enregistrement
+        // le viderait silencieusement.
+        escadron_id: true,
+
         // ── État de sécurité du compte ──
         verrouille_securite: true,
         motif_verrouillage: true,

@@ -5,7 +5,9 @@ import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { SharedDatabaseModule } from '@sigea/shared-database';
 import { AuditModule } from '@sigea/shared-audit';
+import { MessagingModule } from '@sigea/shared-messaging';
 import { VolsModule } from './vols/vols.module';
+import { DiffusionModule } from './diffusion/diffusion.module';
 import { HealthModule } from './health/health.module';
 import { JwtStrategy } from './strategies/jwt.strategy';
 
@@ -21,7 +23,9 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     }),
     SharedDatabaseModule,
     AuditModule,
+    MessagingModule,
     VolsModule,
+    DiffusionModule,
     HealthModule,
   ],
   providers: [JwtStrategy],

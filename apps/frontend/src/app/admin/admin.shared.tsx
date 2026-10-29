@@ -21,6 +21,8 @@ export interface Utilisateur {
   login: string; role: string; base_id: string; actif: boolean;
   last_login?: string; createdAt: string;
   email?: string | null;
+  /** Escadron commandé — renseigné pour les COMEA uniquement. */
+  escadron_id?: string | null;
 
   /** ── État de sécurité ──
    *  Ces trois champs viennent d'être ajoutés au select de
@@ -125,6 +127,55 @@ export const TYPES_MOUVEMENT = [
  *  (apps/auth-service/src/auth/auth.service.ts). Modifier les deux ensemble. */
 export const MAX_ECHECS = 3;
 
+/**
+ * Rôles d'autorité centrale, non rattachés à une base aérienne.
+ *
+ * L'ADMIN administre l'ensemble du système ; le CEMAA et le MAGE exercent une
+ * autorité nationale. Leur imposer une base d'affectation n'a pas de sens et
+ * fausse tous les décomptes « par base ». Le formulaire masque donc le champ
+ * pour ces trois rôles.
+ *
+ * `Utilisateur.base_id` reste NON NULL au schéma : une valeur doit partir. Elle
+ * pointe vers l'entité EMAA, créée par `prisma/seed-emaa.ts`.
+ */
+export const ROLES_SANS_BASE = ['admin', 'cemaa', 'mage'];
+
+export const BASE_ETAT_MAJOR = 'EMAA';
+
+/**
+ * État-major.
+ *
+ * Volontairement HORS de `BASES_FAC` : ce n'est pas une base aérienne, et elle
+ * n'a rien à faire dans les listes de choix d'affectation, les filtres « par
+ * base » ni les décomptes d'implantation. Elle n'est déclarée ici que pour être
+ * affichée correctement là où un `base_id` doit être rendu lisible.
+ */
+export const ETAT_MAJOR = {
+  id: BASE_ETAT_MAJOR,
+  code: BASE_ETAT_MAJOR,
+  nom: "État-Major de l'Armée de l'Air",
+  region: 'Autorité centrale',
+};
+
+export const exigeBase = (role: string): boolean => !ROLES_SANS_BASE.includes(role);
+
+/**
+ * Le COMEA commande un escadron : le rattachement est obligatoire.
+ * La contrainte est vérifiée côté serveur (interim.service.ts, mouvements) ;
+ * la reproduire ici évite de découvrir le refus après coup.
+ */
+export const exigeEscadron = (role: string): boolean => role === 'comea';
+
+/** Escadron tel que renvoyé par GET /referentiel/escadrons (EscadronVue). */
+export interface EscadronVue {
+  id: string; code: string; nom: string;
+  type: string | null; actif: boolean;
+  base_id: string;
+  base: { id: string; code_base: string; nom: string } | null;
+  libelle: string;
+  nb_commandants: number;
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    OUTILS
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -135,8 +186,21 @@ export const libelleRole = (r?: string | null): string =>
 export const couleurRole = (r?: string | null): string =>
   ROLES.find(x => x.value === r)?.color ?? T.textDim;
 
-export const codeBase = (id?: string | null): string =>
-  BASES_FAC.find(b => b.id === id)?.code ?? id ?? '—';
+export const codeBase = (id?: string | null): string => {
+  if (!id) return '—';
+  if (id === BASE_ETAT_MAJOR) return ETAT_MAJOR.code;
+  return BASES_FAC.find(b => b.id === id)?.code ?? id;
+};
+
+/** Libellé complet, pour les infobulles et les fiches. */
+export const nomBase = (id?: string | null): string => {
+  if (!id) return '—';
+  if (id === BASE_ETAT_MAJOR) return ETAT_MAJOR.nom;
+  return BASES_FAC.find(b => b.id === id)?.nom ?? id;
+};
+
+/** Vrai si l'identifiant désigne l'état-major et non une base aérienne. */
+export const estEtatMajor = (id?: string | null): boolean => id === BASE_ETAT_MAJOR;
 
 export const nomComplet = (p?: Partie | null): string =>
   p ? `${p.grade ? p.grade + ' ' : ''}${p.nom} ${p.prenom}`.trim() : '—';

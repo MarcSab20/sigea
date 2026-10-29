@@ -1,34 +1,40 @@
-import {
-  EtapeValidation,
-  MentionSignature,
-  StatutValidation,
-  BLOCS_SIGNATURE,
-  LIBELLE_ETAPE,
-  MENTION_INTERIM,
-} from '@sigea/shared-types';
+// apps/pdf-service/src/pdf/manifeste-template.ts
+//
+// ═══════════════════════════════════════════════════════════════════════════
+// CE QUI CHANGE
+// ═══════════════════════════════════════════════════════════════════════════
+// La grille de CINQ blocs de signature disparaît. Le manifeste ne porte plus
+// qu'un visa, celui du commandant de bord, en pied de document — c'est
+// l'exigence explicite de la directive.
+//
+// La structure du corps, elle, est CONSERVÉE : en-tête, cartouche de mission,
+// tableau des passagers, tableau du fret, cartouche d'authenticité. Elle a été
+// éprouvée et n'avait pas à changer.
+//
+// Le tampon circulaire est maintenu, mais unique et plus grand : sur un
+// document qui n'en porte qu'un, le réduire à la taille d'une vignette de
+// grille le rendrait illisible une fois photocopié.
+//
+// Les passagers retirés par le commandant de bord ne sont PAS imprimés : le
+// manifeste est le document d'embarquement, pas le journal de la décision. Ce
+// filtrage est fait par ManifesteDataService, en amont, pour qu'aucun gabarit
+// ne puisse l'oublier.
+
+import { MentionVisa, LIBELLE_MENTION } from '@sigea/shared-types';
 
 // ─── Contrat d'entrée ──────────────────────────────────────────────────────
-// Volontairement minimal et défensif : le template ne suppose jamais qu'une
-// relation est présente. Un manifeste en BROUILLON n'a pas de tampon ; un vol
-// peut n'avoir aucune escale. Tout est optionnel côté rendu.
+// Volontairement défensif : le gabarit ne suppose jamais qu'une relation est
+// présente. Un manifeste émis mais non visé n'a pas de tampon ; tout est
+// optionnel côté rendu.
 
-export interface TamponData {
-  etape:            EtapeValidation;
-  statut:           StatutValidation;
-  mention:          MentionSignature | null;
-  tampon_ligne1:    string | null;
-  tampon_ligne2:    string | null;
-  signataire_nom:   string | null;
-  signataire_grade: string | null;
+export interface VisaData {
+  mention:          MentionVisa;
+  signataire_nom:   string;
+  signataire_prenom: string;
+  signataire_grade: string;
+  signataire_titre: string;
+  immatriculation?: string | null;
   date_heure:       Date | string | null;
-  /**
-   * Signature apposée au titre d'une délégation (besoin 6).
-   *
-   * Ces trois champs sont FIGÉS dans ValidationEtape à l'instant de la
-   * signature, jamais recalculés à l'impression : révoquer une délégation ne
-   * doit pas réécrire un document déjà signé, et un titulaire muté ne doit pas
-   * disparaître du tampon qu'il a fait apposer en son nom.
-   */
   par_interim?:     boolean;
   titulaire_nom?:   string | null;
   titulaire_grade?: string | null;
@@ -36,44 +42,63 @@ export interface TamponData {
 
 export interface ManifesteRenderData {
   id:            string;
-  numero?:       string | null;
+  numero:        string;
   statut:        string;
-  etape_courante?: string | null;
+  version:       number;
   flag_sensible: boolean;
-  consignes_cemaa_appliquees: boolean;
-  consignes_cemaa_date?: Date | string | null;
-  base?:  { code_base?: string; nom?: string; numero?: string } | null;
+  /** Bandeau d'imposition d'autorité, si au moins une ligne en porte une. */
+  imposition?:   { autorite: string; nb: number } | null;
+
+  base?: { code_base?: string; nom?: string; numero?: string } | null;
+  point?: { ordre: number } | null;
   vol?: {
-    numero_mission?: string;
+    numero_mission?:  string;
     immatriculation?: string;
-    date_heure?: Date | string;
-    type_mission?: string;
-    base_depart?:  { code_base?: string } | null;
-    base_arrivee?: { code_base?: string } | null;
+    date_heure?:      Date | string;
+    type_mission?:    string;
+    /** Itinéraire complet, pour la ligne « Route ». */
+    itineraire?:      { ordre: number; code_base?: string }[];
   } | null;
-  passagers?:    { nom?: string; prenom?: string; grade?: string; categorie?: string; unite?: string }[];
-  materiels?:    { designation?: string; quantite?: number; poids_kg?: number | string }[];
-  marchandises?: { designation?: string; classe_onu?: string; poids_kg?: number | string }[];
-  equipages?:    { nom?: string; prenom?: string; fonction?: string }[];
-  validations?:  TamponData[];
+
+  passagers?: {
+    priorite?:    string;
+    rang?:        number;
+    nom?:         string;
+    prenom?:      string;
+    grade?:       string;
+    categorie?:   string;
+    unite?:       string;
+    destination?: string;
+    nb_bagages?:  number;
+    masse_bagages_kg?: number | string;
+    imposee?:     boolean;
+  }[];
+  materiels?: {
+    designation?: string;
+    proprietaire?: string;
+    poids_kg?:    number | string;
+    destination?: string;
+    classe_iata?: string | null;
+  }[];
+  equipages?: { nom?: string; prenom?: string; grade?: string; fonction?: string }[];
+
+  totaux?: { passagers: number; masse_bagages_kg: number; masse_fret_kg: number };
+
+  /** Visa du commandant de bord. `null` tant qu'il n'est pas apposé. */
+  visa?: VisaData | null;
 
   /**
-   * Cartouche d'authenticité. Absent tant qu'aucun instantané n'a été figé
-   * (manifeste en brouillon) : le document est alors imprimé sans QR, ce qui
-   * est correct — il n'y a rien à authentifier.
+   * Cartouche d'authenticité. Absent tant qu'aucun instantané n'a été figé :
+   * le document est alors imprimé sans QR, ce qui est correct — il n'y a rien
+   * à authentifier.
    */
   authenticite?: {
-    /** Empreinte SHA-256 complète du dernier instantané. */
-    hash: string;
-    /** Forme courte imprimée en clair, recopiable si le QR est abîmé. */
-    hash_court: string;
-    /** Étape à laquelle l'empreinte a été figée. */
-    etape: string;
-    date: Date | string;
-    /** Image PNG du QR, en data URI. Généré par PdfService. */
+    hash:        string;
+    hash_court:  string;
+    etape:       string;
+    date:        Date | string;
     qr_data_uri: string;
-    /** URL encodée dans le QR, affichée en clair sous le cartouche. */
-    url: string;
+    url:         string;
     numero_controle?: string | null;
   } | null;
 }
@@ -81,7 +106,7 @@ export interface ManifesteRenderData {
 // ─── Utilitaires ───────────────────────────────────────────────────────────
 
 /** Échappement HTML — TOUTE donnée dynamique passe par ici (anti-injection). */
-function esc(v: unknown): string {
+export function esc(v: unknown): string {
   if (v === null || v === undefined) return '';
   return String(v)
     .replace(/&/g, '&amp;')
@@ -91,172 +116,165 @@ function esc(v: unknown): string {
     .replace(/'/g, '&#39;');
 }
 
-function fmtDate(d: Date | string | null | undefined): string {
+export function fmtDate(d: Date | string | null | undefined): string {
   if (!d) return '';
   const date = typeof d === 'string' ? new Date(d) : d;
   if (Number.isNaN(date.getTime())) return '';
   const pad = (n: number) => String(n).padStart(2, '0');
-  return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()} ` +
+    `${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-function fmtDateCourte(d: Date | string | null | undefined): string {
+export function fmtDateCourte(d: Date | string | null | undefined): string {
   return fmtDate(d).split(' ')[0] ?? '';
 }
 
-// ─── Le tampon circulaire ──────────────────────────────────────────────────
-// Rendu en SVG : un cercle net à l'impression, indépendant des polices.
-// La couleur d'encre est la même pour tous (bleu réglementaire) ; seul le
-// COMBASE porte ACCORD au lieu de VU.
+const INK = '#123a8f';
+export const MENTION_INTERIM = 'P/I';
 
-function tamponSvg(t: TamponData): string {
-  const signe = t.statut === StatutValidation.APPROUVE && !!t.mention;
-  const INK = '#123a8f'; // encre bleu réglementaire (VU et ACCORD, conforme aux modèles)
+// ─── Le tampon circulaire, unique ──────────────────────────────────────────
+// Rendu en SVG : un cercle net à l'impression, indépendant des polices
+// disponibles dans le conteneur Chromium.
 
-  if (!signe) {
-    // Emplacement réservé : cercle en pointillés « EN ATTENTE ».
+export function tamponSvg(v: VisaData | null | undefined, taille = 190): string {
+  if (!v) {
     return `
-      <svg viewBox="0 0 160 160" class="tampon" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="80" cy="80" r="68" fill="none" stroke="#b3bccd" stroke-width="1.6" stroke-dasharray="5 4"/>
-        <text x="80" y="85" text-anchor="middle" font-family="Arial, sans-serif" font-size="9.5"
-              fill="#9aa6b8" letter-spacing="1">EN ATTENTE</text>
+      <svg viewBox="0 0 200 200" class="tampon" style="max-width:${taille}px"
+           xmlns="http://www.w3.org/2000/svg">
+        <circle cx="100" cy="100" r="86" fill="none" stroke="#b3bccd"
+                stroke-width="2" stroke-dasharray="6 5"/>
+        <text x="100" y="105" text-anchor="middle" font-family="Arial, sans-serif"
+              font-size="12" fill="#9aa6b8" letter-spacing="1.5">EN ATTENTE</text>
       </svg>`;
   }
 
-  const l1 = esc(t.tampon_ligne1);
-  const l2 = t.tampon_ligne2 ? esc(t.tampon_ligne2) : '';
-  const dateStr = esc(fmtDateCourte(t.date_heure));
-  const mention = esc(t.mention);
+  const mention = esc(LIBELLE_MENTION[v.mention] ?? v.mention);
+  const l1 = esc(`${v.signataire_grade} ${v.signataire_nom}`.trim());
+  const l2 = esc(v.immatriculation ?? '');
+  const dateStr = esc(fmtDateCourte(v.date_heure));
 
   // ── Mention d'intérim ──
-  //
-  // Le « P/I » se place À GAUCHE de la mention principale, comme sur un
-  // parapheur papier : c'est un qualificatif de la signature, pas une
-  // signature distincte. Le nom du titulaire empêché figure sous le trait
-  // inférieur, avec la date — un contrôleur doit pouvoir lire, sur le seul
-  // tampon, POUR QUI le signataire a signé. Sans cela la mention n'apprend
-  // rien : on saurait qu'il y a eu intérim, pas de quel poste.
-  const pi = t.par_interim
-    ? `<text x="26" y="56" text-anchor="middle" font-family="Arial, sans-serif" font-size="13"
-             font-weight="800" fill="${INK}">${esc(MENTION_INTERIM)}</text>`
+  // Le « P/I » se place à gauche de la mention principale, comme sur un
+  // parapheur papier : c'est un qualificatif de la signature, pas une signature
+  // distincte. Le nom du titulaire empêché figure sous le trait inférieur — un
+  // contrôleur doit pouvoir lire, sur le seul tampon, POUR QUI il a été signé.
+  const pi = v.par_interim
+    ? `<text x="34" y="72" text-anchor="middle" font-family="Arial, sans-serif"
+             font-size="15" font-weight="800" fill="${INK}">${esc(MENTION_INTERIM)}</text>`
     : '';
-
-  const ligneTitulaire = t.par_interim && t.titulaire_nom
-    ? `<text x="80" y="137" text-anchor="middle" font-family="Arial, sans-serif" font-size="7"
-             fill="${INK}">p/ ${esc(`${t.titulaire_grade ?? ''} ${t.titulaire_nom}`.trim())}</text>`
+  const ligneTitulaire = v.par_interim && v.titulaire_nom
+    ? `<text x="100" y="172" text-anchor="middle" font-family="Arial, sans-serif"
+             font-size="8.5" fill="${INK}">p/ ${esc(`${v.titulaire_grade ?? ''} ${v.titulaire_nom}`.trim())}</text>`
     : '';
-
-  // Rôle/signataire : 1 ligne (VU simple) ou 2 lignes (COMBORD/COMBASE).
-  const lignes = l2
-    ? `<text x="80" y="86" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="700" fill="${INK}">${l1}</text>
-       <text x="80" y="101" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" font-weight="600" fill="${INK}">${l2}</text>`
-    : `<text x="80" y="94" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="700" fill="${INK}">${l1}</text>`;
 
   return `
-    <svg viewBox="0 0 160 160" class="tampon" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="80" cy="80" r="70" fill="none" stroke="${INK}" stroke-width="3"/>
-      <circle cx="80" cy="80" r="62" fill="none" stroke="${INK}" stroke-width="1.2"/>
+    <svg viewBox="0 0 200 200" class="tampon" style="max-width:${taille}px"
+         xmlns="http://www.w3.org/2000/svg">
+      <circle cx="100" cy="100" r="88" fill="none" stroke="${INK}" stroke-width="3.5"/>
+      <circle cx="100" cy="100" r="79" fill="none" stroke="${INK}" stroke-width="1.4"/>
       ${pi}
-      <text x="80" y="56" text-anchor="middle" font-family="Arial, sans-serif" font-size="19"
-            font-weight="800" fill="${INK}" letter-spacing="1">${mention}</text>
-      <line x1="34" y1="64" x2="126" y2="64" stroke="${INK}" stroke-width="1"/>
-      ${lignes}
-      <line x1="42" y1="112" x2="118" y2="112" stroke="${INK}" stroke-width="0.8"/>
-      <text x="80" y="127" text-anchor="middle" font-family="Arial, sans-serif" font-size="8.5" fill="${INK}">${dateStr}</text>
+      <text x="100" y="72" text-anchor="middle" font-family="Arial, sans-serif"
+            font-size="15" font-weight="800" fill="${INK}" letter-spacing="0.8">${mention}</text>
+      <line x1="34" y1="82" x2="166" y2="82" stroke="${INK}" stroke-width="1"/>
+      <text x="100" y="104" text-anchor="middle" font-family="Arial, sans-serif"
+            font-size="10.5" font-weight="600" fill="${INK}">${esc(v.signataire_titre)}</text>
+      <text x="100" y="121" text-anchor="middle" font-family="Arial, sans-serif"
+            font-size="13" font-weight="700" fill="${INK}">${l1}</text>
+      ${l2 ? `<text x="100" y="136" text-anchor="middle" font-family="Arial, sans-serif"
+            font-size="11" font-weight="600" fill="${INK}">${l2}</text>` : ''}
+      <line x1="48" y1="146" x2="152" y2="146" stroke="${INK}" stroke-width="0.9"/>
+      <text x="100" y="161" text-anchor="middle" font-family="Arial, sans-serif"
+            font-size="9.5" fill="${INK}">${dateStr}</text>
       ${ligneTitulaire}
     </svg>`;
 }
 
-function blocSignature(etape: EtapeValidation, t: TamponData | undefined): string {
-  const data: TamponData = t ?? {
-    etape, statut: StatutValidation.EN_ATTENTE,
-    mention: null, tampon_ligne1: null, tampon_ligne2: null,
-    signataire_nom: null, signataire_grade: null, date_heure: null,
-    par_interim: false, titulaire_nom: null, titulaire_grade: null,
-  };
+// ─── Bandeaux ──────────────────────────────────────────────────────────────
+
+function bandeauImposition(data: ManifesteRenderData): string {
+  if (!data.imposition) return '';
   return `
-    <div class="bloc">
-      <div class="bloc-titre">${esc(LIBELLE_ETAPE[etape])}</div>
-      ${tamponSvg(data)}
+    <div class="flag">
+      <span class="pastille">${esc(data.imposition.autorite)}</span>
+      ${data.imposition.nb} EMBARQUEMENT(S) IMPOSÉ(S) PAR L'AUTORITÉ CENTRALE
     </div>`;
 }
 
-// ─── Bandeau consignes CEMAA ───────────────────────────────────────────────
-
-function bandeauCemaa(data: ManifesteRenderData): string {
-  if (!data.consignes_cemaa_appliquees) return '';
-  const d = fmtDate(data.consignes_cemaa_date);
-  return `
-    <div class="cemaa-flag">
-      <span class="cemaa-pastille">CEMAA</span>
-      CONSIGNES CEMAA APPLIQUÉES${d ? ` — ${esc(d)}` : ''}
-    </div>`;
+function filigrane(watermark: string): string {
+  return watermark ? `<div class="watermark">${esc(watermark)}</div>` : '';
 }
 
-// ─── Tableaux de contenu ───────────────────────────────────────────────────
+// ─── Tableaux ──────────────────────────────────────────────────────────────
 
 function tablePassagers(rows: ManifesteRenderData['passagers']): string {
-  if (!rows?.length) return '<p class="vide">Aucun passager déclaré.</p>';
+  if (!rows?.length) return '<p class="vide">Aucun passager porté au manifeste.</p>';
   const trs = rows.map((p, i) => `
     <tr>
       <td class="c">${i + 1}</td>
-      <td>${esc(p.grade)} ${esc(p.nom)} ${esc(p.prenom)}</td>
+      <td class="c pr">${esc(p.priorite)}</td>
+      <td>${esc(p.grade)} ${esc(p.nom)} ${esc(p.prenom)}${
+        p.imposee ? ' <span class="imp">IMPOSÉ</span>' : ''}</td>
       <td>${esc(p.categorie)}</td>
       <td>${esc(p.unite)}</td>
+      <td>${esc(p.destination)}</td>
+      <td class="c">${esc(p.nb_bagages)}</td>
+      <td class="c">${esc(p.masse_bagages_kg)}</td>
     </tr>`).join('');
   return `
     <table class="tbl">
-      <thead><tr><th class="c">N°</th><th>Identité</th><th>Catégorie</th><th>Unité</th></tr></thead>
+      <thead><tr>
+        <th class="c">N°</th><th class="c">Prio</th><th>Identité</th>
+        <th>Catégorie</th><th>Unité</th><th>Destination</th>
+        <th class="c">Bag.</th><th class="c">Kg</th>
+      </tr></thead>
       <tbody>${trs}</tbody>
     </table>`;
 }
 
-function tableFret(
-  materiels: ManifesteRenderData['materiels'],
-  marchandises: ManifesteRenderData['marchandises'],
-): string {
-  const mats = (materiels ?? []).map((m) => ({
-    designation: m.designation, detail: '', poids: m.poids_kg, qte: m.quantite,
-  }));
-  const dgr = (marchandises ?? []).map((m) => ({
-    designation: m.designation, detail: `ONU ${m.classe_onu ?? ''}`.trim(), poids: m.poids_kg, qte: 1,
-  }));
-  const all = [...mats, ...dgr];
-  if (!all.length) return '<p class="vide">Aucun fret déclaré.</p>';
-  const trs = all.map((m, i) => `
+function tableFret(rows: ManifesteRenderData['materiels']): string {
+  if (!rows?.length) return '<p class="vide">Aucun fret déclaré.</p>';
+  const trs = rows.map((m, i) => `
     <tr>
       <td class="c">${i + 1}</td>
-      <td>${esc(m.designation)}${m.detail ? ` <span class="dgr">${esc(m.detail)}</span>` : ''}</td>
-      <td class="c">${esc(m.qte)}</td>
-      <td class="c">${esc(m.poids)}</td>
+      <td>${esc(m.designation)}${
+        m.classe_iata ? ` <span class="dgr">IATA ${esc(m.classe_iata)}</span>` : ''}</td>
+      <td>${esc(m.proprietaire)}</td>
+      <td>${esc(m.destination)}</td>
+      <td class="c">${esc(m.poids_kg)}</td>
     </tr>`).join('');
   return `
     <table class="tbl">
-      <thead><tr><th class="c">N°</th><th>Désignation</th><th class="c">Qté</th><th class="c">Poids (kg)</th></tr></thead>
+      <thead><tr>
+        <th class="c">N°</th><th>Désignation</th><th>Propriétaire</th>
+        <th>Destination</th><th class="c">Poids (kg)</th>
+      </tr></thead>
       <tbody>${trs}</tbody>
     </table>`;
 }
 
-// ─── Filigrane de confidentialité ──────────────────────────────────────────
-
-function filigrane(watermark: string): string {
-  if (!watermark) return '';
-  return `<div class="watermark">${esc(watermark)}</div>`;
+function tableEquipage(rows: ManifesteRenderData['equipages']): string {
+  if (!rows?.length) return '<p class="vide">Équipage non déclaré.</p>';
+  const trs = rows.map((e) => `
+    <tr><td>${esc(e.grade)} ${esc(e.nom)} ${esc(e.prenom)}</td><td>${esc(e.fonction)}</td></tr>`
+  ).join('');
+  return `<table class="tbl tbl-eq">
+    <thead><tr><th>Identité</th><th>Fonction</th></tr></thead>
+    <tbody>${trs}</tbody></table>`;
 }
 
+// ─── Cartouche d'authenticité ──────────────────────────────────────────────
+
 /**
- * Cartouche d'authenticité imprimé en pied de document.
- *
  * Le QR porte l'URL de vérification ; l'empreinte courte est imprimée en clair
  * à côté pour rester exploitable si le code est déchiré, mouillé ou photocopié
  * de travers — situation banale sur un tarmac.
  */
-function cartoucheAuthenticite(data: ManifesteRenderData): string {
-  const a = data.authenticite;
+export function cartoucheAuthenticite(a: ManifesteRenderData['authenticite']): string {
   if (!a) {
     return `<div class="auth auth-absent">
       <div class="auth-txt">
         <div class="auth-t">Document non authentifiable</div>
-        <div class="auth-d">Aucune empreinte n'a été figée pour cet état du manifeste.
+        <div class="auth-d">Aucune empreinte n'a été figée pour cet état du document.
         Ce tirage est un document de travail et n'a pas valeur de pièce vérifiable.</div>
       </div>
     </div>`;
@@ -267,42 +285,21 @@ function cartoucheAuthenticite(data: ManifesteRenderData): string {
       <div class="auth-t">Vérification d'authenticité</div>
       <div class="auth-d">Scanner le code, ou saisir l'empreinte sur&nbsp;:<br/>
         <span class="auth-url">${esc(a.url.split('?')[0])}</span></div>
-            <div class="auth-h">Empreinte SHA-256 : <b>${esc(a.hash_court)}</b></div>
+      <div class="auth-h">Empreinte SHA-256 : <b>${esc(a.hash_court)}</b></div>
       ${a.numero_controle ? `
       <div class="auth-n">
         <span class="auth-n-l">N° de contrôle</span>
         <span class="auth-n-v">${esc(a.numero_controle)}</span>
       </div>
-      <div class="auth-w">Ce numéro doit être identique à celui affiché après
-        lecture du code. Toute divergence rend le tirage irrecevable.</div>` : ''}
-      <div class="auth-d">Figée à l'étape ${esc(a.etape)} le ${esc(fmtDate(a.date))}</div>
+      <div class="auth-w">Ce numéro doit être identique à celui affiché après lecture
+        du code. Toute divergence rend le tirage irrecevable.</div>` : ''}
+      <div class="auth-d">Figée le ${esc(fmtDate(a.date))}</div>
     </div>
   </div>`;
 }
 
-// ─── Document complet ──────────────────────────────────────────────────────
-
-export function renderManifesteHtml(
-  data: ManifesteRenderData,
-  watermark = '',
-): string {
-  const valParEtape = new Map<string, TamponData>(
-    (data.validations ?? []).map((v) => [v.etape, v]),
-  );
-
-  const blocs = BLOCS_SIGNATURE
-    .map((etape) => blocSignature(etape, valParEtape.get(etape)))
-    .join('');
-
-  const routeEscale = data.vol
-    ? `${esc(data.vol.base_depart?.code_base)} → ${esc(data.vol.base_arrivee?.code_base)}`
-    : '';
-
-  return `<!DOCTYPE html>
-<html lang="fr">
-<head>
-<meta charset="UTF-8"/>
-<style>
+/** Feuille de style commune au manifeste et à la liste hiérarchisée. */
+export const STYLE_COMMUN = `
   @page { size: A4; margin: 14mm 12mm; }
   * { box-sizing: border-box; }
   body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 10.5px; color: #1a1a1a; margin: 0; }
@@ -314,114 +311,140 @@ export function renderManifesteHtml(
   }
   .page { position: relative; z-index: 1; }
 
-  header { text-align: center; border-bottom: 2px solid #123a8f; padding-bottom: 6px; margin-bottom: 8px; }
+  header { text-align: center; border-bottom: 2px solid ${INK}; padding-bottom: 6px; margin-bottom: 8px; }
   header .rep { font-size: 9px; letter-spacing: 1px; color: #444; }
-  header h1 { font-size: 16px; margin: 4px 0 2px; color: #123a8f; text-transform: uppercase; }
+  header h1 { font-size: 16px; margin: 4px 0 2px; color: ${INK}; text-transform: uppercase; }
   header .sub { font-size: 10px; color: #555; }
 
   .meta { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 3px 14px; margin: 8px 0; font-size: 10px; }
   .meta div { border-bottom: 1px dotted #ccc; padding: 2px 0; }
-  .meta b { color: #123a8f; }
+  .meta b { color: ${INK}; }
 
-  .cemaa-flag {
+  .flag {
     background: #fdf2e0; border: 1.5px solid #c8860a; color: #8a5a00;
     font-weight: 700; font-size: 10px; padding: 4px 10px; margin: 6px 0;
     border-radius: 3px; display: flex; align-items: center; gap: 8px; letter-spacing: 0.5px;
   }
-  .cemaa-pastille {
-    background: #c8860a; color: #fff; font-size: 8.5px; font-weight: 800;
-    padding: 2px 6px; border-radius: 10px; letter-spacing: 1px;
-  }
+  .pastille { background: #c8860a; color: #fff; font-size: 8.5px; font-weight: 800;
+    padding: 2px 6px; border-radius: 10px; letter-spacing: 1px; }
 
-  h2.section { font-size: 11px; color: #123a8f; border-left: 3px solid #123a8f;
+  h2.section { font-size: 11px; color: ${INK}; border-left: 3px solid ${INK};
     padding-left: 6px; margin: 12px 0 5px; text-transform: uppercase; }
 
   table.tbl { width: 100%; border-collapse: collapse; font-size: 9.5px; }
-  table.tbl th { background: #123a8f; color: #fff; padding: 4px 6px; text-align: left; font-weight: 600; }
+  table.tbl th { background: ${INK}; color: #fff; padding: 4px 6px; text-align: left; font-weight: 600; }
   table.tbl td { padding: 3px 6px; border-bottom: 1px solid #e2e2e2; }
   table.tbl tr:nth-child(even) td { background: #f6f8fc; }
+  table.tbl-eq { width: 60%; }
   .c { text-align: center; }
+  .pr { font-weight: 700; color: ${INK}; }
   .dgr { color: #b00; font-weight: 700; font-size: 8.5px; }
+  .imp { color: #8a5a00; font-weight: 700; font-size: 8px; }
   .vide { font-style: italic; color: #888; font-size: 9.5px; padding: 4px 0; }
 
-  .signatures { margin-top: 16px; page-break-inside: avoid; }
-  .signatures h2 { text-align: center; }
-  .blocs { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 8px; }
-  .bloc { text-align: center; border: 1px solid #dde; border-radius: 4px; padding: 6px 2px 4px; }
-  .bloc-titre { font-size: 8px; font-weight: 700; color: #123a8f; text-transform: uppercase;
-    margin-bottom: 4px; min-height: 22px; display: flex; align-items: center; justify-content: center; }
-  .tampon { width: 100%; height: auto; max-width: 96px; }
-  .t-mention  { font-size: 15px; font-weight: 800; fill: #123a8f; letter-spacing: 1px; }
-  .t-l1 { font-size: 11px; font-weight: 700; fill: #123a8f; }
-  .t-l2 { font-size: 10px; font-weight: 600; fill: #123a8f; }
-  .t-date { font-size: 8px; fill: #123a8f; }
-  .t-attente { font-size: 9px; fill: #9aa; letter-spacing: 1px; }
+  .totaux { margin-top: 6px; font-size: 9.5px; display: flex; gap: 18px; color: #333; }
+  .totaux b { color: ${INK}; }
+
+  .signature { margin-top: 18px; page-break-inside: avoid; display: flex;
+    justify-content: flex-end; }
+  .sig-bloc { text-align: center; width: 230px; }
+  .sig-titre { font-size: 9px; font-weight: 700; color: ${INK};
+    text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px; }
+  .tampon { width: 100%; height: auto; }
 
   footer { margin-top: 14px; border-top: 1px solid #ccc; padding-top: 4px;
     font-size: 8px; color: #888; display: flex; justify-content: space-between; }
-  .statut-tag { font-weight: 700; }
-  .statut-VALIDE { color: #1a7a34; }
-  .statut-REJETE { color: #b00; }
-  .statut-EN_VALIDATION, .statut-SOUMIS { color: #c8860a; }
 
-  .auth { margin-top: 12px; border: 1px solid #123a8f; border-radius: 4px;
+  .auth { margin-top: 12px; border: 1px solid ${INK}; border-radius: 4px;
     padding: 7px 9px; display: flex; gap: 10px; align-items: center;
     background: #f6f8fd; page-break-inside: avoid; }
   .auth-absent { border-color: #c9a227; background: #fdfaf0; }
   .auth-qr { width: 76px; height: 76px; flex-shrink: 0; }
-  .auth-t { font-size: 9.5px; font-weight: 700; color: #123a8f;
+  .auth-t { font-size: 9.5px; font-weight: 700; color: ${INK};
     text-transform: uppercase; letter-spacing: 0.06em; }
   .auth-absent .auth-t { color: #8a6d0b; }
   .auth-d { font-size: 8px; color: #555; line-height: 1.45; margin-top: 2px; }
-  .auth-url { font-family: 'Consolas', monospace; color: #123a8f; }
+  .auth-url { font-family: 'Consolas', monospace; color: ${INK}; }
   .auth-h { font-size: 9px; margin-top: 3px; font-family: 'Consolas', monospace;
     letter-spacing: 0.08em; color: #1a1a1a; }
-  .auth-n   { margin-top: 5px; display: flex; align-items: baseline; gap: 8px; }
+  .auth-n { margin-top: 5px; display: flex; align-items: baseline; gap: 8px; }
   .auth-n-l { font-size: 8px; text-transform: uppercase; letter-spacing: 1px; color: #5b6472; }
   .auth-n-v { font-family: Consolas, 'Courier New', monospace; font-size: 13px;
-              font-weight: 700; letter-spacing: 1.6px; color: #123a8f; }
-  .auth-w   { margin-top: 3px; font-size: 7px; line-height: 1.4; color: #7a0016; }
-</style>
+    font-weight: 700; letter-spacing: 1.6px; color: ${INK}; }
+  .auth-w { margin-top: 3px; font-size: 7px; line-height: 1.4; color: #7a0016; }
+`;
+
+// ─── Document complet ──────────────────────────────────────────────────────
+
+export function renderManifesteHtml(data: ManifesteRenderData, watermark = ''): string {
+  const route = (data.vol?.itineraire ?? [])
+    .sort((a, b) => a.ordre - b.ordre)
+    .map((p) => esc(p.code_base))
+    .join(' → ');
+
+  const t = data.totaux;
+
+  return `<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<style>${STYLE_COMMUN}</style>
 </head>
 <body>
   ${filigrane(watermark)}
   <div class="page">
     <header>
       <div class="rep">RÉPUBLIQUE DU CAMEROUN — FORCES ARMÉES CAMEROUNAISES</div>
-      <h1>Manifeste d'escale aérienne</h1>
+      <h1>Manifeste d'embarquement</h1>
       <div class="sub">Système Intégré de Gestion des Escales Aériennes — SIGEA</div>
     </header>
 
-    ${bandeauCemaa(data)}
+    ${bandeauImposition(data)}
 
     <div class="meta">
-      <div><b>N° manifeste :</b> ${esc(data.numero ?? data.id)}</div>
+      <div><b>N° manifeste :</b> ${esc(data.numero)}</div>
       <div><b>Mission :</b> ${esc(data.vol?.numero_mission)}</div>
       <div><b>Aéronef :</b> ${esc(data.vol?.immatriculation)}</div>
-      <div><b>Route :</b> ${routeEscale}</div>
+      <div><b>Route :</b> ${route}</div>
       <div><b>Départ :</b> ${esc(fmtDate(data.vol?.date_heure))}</div>
       <div><b>Type mission :</b> ${esc(data.vol?.type_mission)}</div>
-      <div><b>Base d'escale :</b> ${esc(data.base?.code_base)} — ${esc(data.base?.nom)}</div>
-      <div><b>Statut :</b> <span class="statut-tag statut-${esc(data.statut)}">${esc(data.statut)}</span></div>
+      <div><b>Point d'embarquement :</b> ${esc(data.base?.code_base)} — ${esc(data.base?.nom)}</div>
+      <div><b>Statut :</b> ${esc(data.statut)}</div>
       <div>${data.flag_sensible ? '<b style="color:#b00">VOL SENSIBLE</b>' : ''}</div>
     </div>
 
-    <h2 class="section">Passagers</h2>
+    <h2 class="section">Passagers embarqués</h2>
     ${tablePassagers(data.passagers)}
 
-    <h2 class="section">Fret & marchandises</h2>
-    ${tableFret(data.materiels, data.marchandises)}
+    <h2 class="section">Fret</h2>
+    ${tableFret(data.materiels)}
 
-    <div class="signatures">
-      <h2 class="section">Circuit de validation</h2>
-      <div class="blocs">${blocs}</div>
+    <h2 class="section">Équipage</h2>
+    ${tableEquipage(data.equipages)}
+
+    ${t ? `<div class="totaux">
+      <span><b>Passagers :</b> ${esc(t.passagers)}</span>
+      <span><b>Bagages :</b> ${esc(t.masse_bagages_kg)} kg</span>
+      <span><b>Fret :</b> ${esc(t.masse_fret_kg)} kg</span>
+      <span><b>Masse totale :</b> ${esc(
+        Number((t.masse_bagages_kg + t.masse_fret_kg).toFixed(2)),
+      )} kg</span>
+    </div>` : ''}
+
+    <div class="signature">
+      <div class="sig-bloc">
+        <div class="sig-titre">Visa du commandant de bord</div>
+        ${tamponSvg(data.visa)}
+      </div>
     </div>
 
-    ${cartoucheAuthenticite(data)}
+    ${cartoucheAuthenticite(data.authenticite)}
 
     <footer>
-      <span>SIGEA — Document ${esc(data.statut === 'VALIDE' ? 'validé' : 'en cours de validation')}</span>
-      <span>Généré le ${esc(fmtDate(new Date()))}</span>
+      <span>SIGEA — ${esc(data.statut === 'DEFINITIF'
+        ? 'Manifeste définitif'
+        : 'Manifeste émis, en attente du visa du commandant de bord')}</span>
+      <span>Version ${esc(data.version)} — généré le ${esc(fmtDate(new Date()))}</span>
     </footer>
   </div>
 </body>

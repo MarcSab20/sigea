@@ -189,16 +189,167 @@ interface Liaison {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   SIMULATION DE DÉMONSTRATION
+   ───────────────────────────────────────────────────────────────────────────
+   Deux aéronefs parcourent une route entre bases réelles, à vitesse réaliste.
+
+   ⚠ Ce sont des positions CALCULÉES, pas mesurées. La carte l'affiche en
+   permanence par un bandeau « SIMULATION » que rien ne masque, et les glyphes
+   sont hachurés. C'est la condition pour qu'une démonstration reste une
+   démonstration : sur un tableau de bord de commandement, une trace qu'on ne
+   peut pas distinguer d'une vraie est un risque, pas une fonctionnalité.
+
+   Dès qu'une source réelle est branchée (prop `sourcePositions`), elle prend
+   le pas et la simulation s'arrête d'elle-même.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+interface VolSimule {
+  immatriculation: string;
+  numero_mission: string;
+  type: string;
+  etapes: string[];
+  /** Vitesse sol en nœuds — sert au déplacement et à l'affichage. */
+  vitesse_kt: number;
+  alt_ft: number;
+  /** Position initiale sur la route, en fraction [0,1]. */
+  depart: number;
+}
+
+const VOLS_SIMULES: VolSimule[] = [
+  {
+    immatriculation: 'TJ-XAB', numero_mission: 'MIQ-4417-SIM',
+    type: 'Transport tactique',
+    etapes: ['BA101', 'BA302', 'BA301', 'BA401'],
+    vitesse_kt: 285, alt_ft: 21000, depart: 0.08,
+  },
+  {
+    immatriculation: 'TJ-XCD', numero_mission: 'MIQ-4418-SIM',
+    type: 'Voilure tournante',
+    etapes: ['BA201', 'BA501'],
+    vitesse_kt: 125, alt_ft: 4500, depart: 0.42,
+  },
+];
+
+/** Un degré de latitude vaut environ 60 milles nautiques. Suffisant ici : la
+ *  projection est équirectangulaire, la précision géodésique n'a pas d'objet. */
+const NM_PAR_DEGRE = 60;
+
+function longueurNm(etapes: string[]): number {
+  let total = 0;
+  for (let i = 0; i < etapes.length - 1; i += 1) {
+    const a = BASES.find(b => b.code === etapes[i]);
+    const b = BASES.find(x => x.code === etapes[i + 1]);
+    if (!a || !b) continue;
+    const dlat = b.lat - a.lat;
+    const dlng = (b.lng - a.lng) * Math.cos(((a.lat + b.lat) / 2) * Math.PI / 180);
+    total += Math.hypot(dlat, dlng) * NM_PAR_DEGRE;
+  }
+  return total;
+}
+
+/**
+ * Position le long de la route, pour une avance donnée. Renvoie aussi le cap,
+ * calculé sur le segment courant — un glyphe orienté au hasard trahit
+ * immédiatement le procédé.
+ */
+function pointSurRoute(etapes: string[], avance: number):
+{ lat: number; lng: number; cap: number } | null {
+  const pts = etapes
+    .map(c => BASES.find(b => b.code === c))
+    .filter((b): b is BaseGeo => Boolean(b));
+  if (pts.length < 2) return null;
+
+  const segments = pts.length - 1;
+  const brut = Math.min(0.9999, Math.max(0, avance)) * segments;
+  const i = Math.floor(brut);
+  const t = brut - i;
+
+  const a = pts[i];
+  const b = pts[i + 1];
+  const dlat = b.lat - a.lat;
+  const dlng = (b.lng - a.lng) * Math.cos((a.lat * Math.PI) / 180);
+  // atan2(est, nord) → cap vrai, 0 = nord, sens horaire.
+  const cap = (Math.atan2(dlng, dlat) * 180) / Math.PI;
+
+  return {
+    lat: a.lat + (b.lat - a.lat) * t,
+    lng: a.lng + (b.lng - a.lng) * t,
+    cap: (cap + 360) % 360,
+  };
+}
+
+/**
+ * Avance les deux aéronefs simulés.
+ *
+ * Un transport à 285 kt sur 600 NM met plus de deux heures : invisible à
+ * l'écran. Un facteur d'accélération comprime cette durée — et il est AFFICHÉ
+ * dans le bandeau, pas caché.
+ */
+function useVolsSimules(actif: boolean, acceleration = 120): PositionAeronef[] {
+  const [positions, setPositions] = useState<PositionAeronef[]>([]);
+  const debut = useRef(Date.now());
+
+  useEffect(() => {
+    if (!actif) { setPositions([]); return; }
+
+    const reduit = typeof window !== 'undefined' && window.matchMedia
+      && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    const calculer = (): void => {
+      const ecoule = (Date.now() - debut.current) / 1000;
+
+      setPositions(VOLS_SIMULES.map(v => {
+        const nm = longueurNm(v.etapes) || 1;
+        const duree = (nm / v.vitesse_kt) * 3600 / acceleration;
+        const p = pointSurRoute(v.etapes, (v.depart + ecoule / duree) % 1);
+        if (!p) return null;
+        return {
+          immatriculation: v.immatriculation,
+          numero_mission: v.numero_mission,
+          lat: p.lat, lng: p.lng, cap_deg: p.cap,
+          alt_ft: v.alt_ft, vitesse_kt: v.vitesse_kt,
+          horodatage: new Date().toISOString(),
+        } as PositionAeronef;
+      }).filter((x): x is PositionAeronef => x !== null));
+    };
+
+    calculer();
+    // Mouvement réduit : position actualisée lentement. Le contenu reste
+    // complet, seul le déplacement continu disparaît.
+    const id = window.setInterval(calculer, reduit ? 10_000 : 1000);
+    return () => window.clearInterval(id);
+  }, [actif, acceleration]);
+
+  return positions;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
    COMPOSANT
    ═══════════════════════════════════════════════════════════════════════════ */
 
-export default function CameroonMap({ sourcePositions, periodeMs = PERIODE_MS }: {
-  /** Source de positions mesurées. Absente, aucun aéronef n'est affiché. */
+export default function CameroonMap({
+  sourcePositions, periodeMs = PERIODE_MS, simulation = true, acceleration = 120,
+}: {
+  /** Source de positions mesurées. Si fournie, elle prime sur la simulation. */
   sourcePositions?: SourcePositions;
   periodeMs?: number;
+  /**
+   * Fait circuler deux aéronefs de démonstration sur des routes réelles.
+   * Passez `false` dès qu'une source mesurée existe. Un bandeau « SIMULATION »
+   * reste affiché tant que ce mode est actif.
+   */
+  simulation?: boolean;
+  /** Compression du temps. 120 = deux heures de vol jouées en une minute. */
+  acceleration?: number;
 }): React.ReactElement {
   const [vols, setVols] = useState<Vol[]>([]);
-  const [positions, setPositions] = useState<PositionAeronef[]>([]);
+  const [positionsReelles, setPositionsReelles] = useState<PositionAeronef[]>([]);
+
+  // La source mesurée prime toujours : la simulation ne tourne que si aucune
+  // n'est branchée. Impossible de les superposer par inadvertance.
+  const simule = simulation && !sourcePositions;
+  const positionsSimulees = useVolsSimules(simule, acceleration);
+  const positions = sourcePositions ? positionsReelles : positionsSimulees;
   const [chargement, setChargement] = useState(true);
   const [erreur, setErreur] = useState<string | null>(null);
   const [derniereMaj, setDerniereMaj] = useState<Date | null>(null);
@@ -234,9 +385,9 @@ export default function CameroonMap({ sourcePositions, periodeMs = PERIODE_MS }:
 
     if (sourcePositions) {
       try {
-        setPositions(await sourcePositions());
+        setPositionsReelles(await sourcePositions());
       } catch {
-        setPositions([]);
+        setPositionsReelles([]);
       }
     }
   }, [sourcePositions]);
@@ -256,6 +407,34 @@ export default function CameroonMap({ sourcePositions, periodeMs = PERIODE_MS }:
     );
 
     const out: Liaison[] = [];
+
+    // Les routes des aéronefs simulés sont tracées comme les autres : un
+    // appareil qui se déplace sans route visible n'a aucun sens.
+    if (simule) {
+      VOLS_SIMULES.forEach((v, iv) => {
+        for (let i = 0; i < v.etapes.length - 1; i += 1) {
+          const a = pt(v.etapes[i]);
+          const b = pt(v.etapes[i + 1]);
+          if (!a || !b) continue;
+          out.push({
+            cle: `sim-${v.immatriculation}-${i}`,
+            volId: `sim-${v.immatriculation}`,
+            vol: {
+              id: `sim-${v.immatriculation}`,
+              numero_mission: v.numero_mission,
+              immatriculation: v.immatriculation,
+              date_heure: new Date().toISOString(),
+              statut: 'EN_COURS',
+            },
+            d: arc(a, b, (iv % 2 === 0 ? 1 : -1) * 0.15),
+            depart: v.etapes[i], arrivee: v.etapes[i + 1],
+            enCours: true,
+            duree: 5 + iv,
+          });
+        }
+      });
+    }
+
     retenus.forEach((v, iv) => {
       const codes = codesDeVol(v);
       for (let i = 0; i < codes.length - 1; i += 1) {
@@ -275,7 +454,7 @@ export default function CameroonMap({ sourcePositions, periodeMs = PERIODE_MS }:
       }
     });
     return out;
-  }, [vols]);
+  }, [vols, simule]);
 
   const enCours = vols.filter(v => v.statut === 'EN_COURS');
   const planifies = vols.filter(v =>
@@ -297,7 +476,7 @@ export default function CameroonMap({ sourcePositions, periodeMs = PERIODE_MS }:
         && (v.statut === 'EN_COURS' || v.statut === 'PLANIFIE'))
     : [];
 
-  const enDirect = Boolean(sourcePositions) && positions.length > 0;
+  const enDirect = Boolean(sourcePositions) && positionsReelles.length > 0;
 
   return (
     <div className={`cm-root ${monte ? 'is-in' : ''}`} style={{ width: '100%' }}>
@@ -317,7 +496,7 @@ export default function CameroonMap({ sourcePositions, periodeMs = PERIODE_MS }:
         </div>
 
         <EtatSource enDirect={enDirect} branchee={Boolean(sourcePositions)}
-                    erreur={erreur} maj={derniereMaj} periodeMs={periodeMs} />
+                    simule={simule} erreur={erreur} maj={derniereMaj} periodeMs={periodeMs} />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 250px', gap: 16 }}>
@@ -343,6 +522,14 @@ export default function CameroonMap({ sourcePositions, periodeMs = PERIODE_MS }:
                 <stop offset="0%"   stopColor="rgba(45,106,79,.34)" />
                 <stop offset="100%" stopColor="rgba(45,106,79,.16)" />
               </linearGradient>
+
+              {/* Hachures des glyphes simulés : la distinction se fait à l'œil,
+                  sans avoir à lire une légende. */}
+              <pattern id="cmHachures" width="6" height="6"
+                       patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                <rect width="6" height="6" fill={T.amberBg} />
+                <line x1="0" y1="0" x2="0" y2="6" stroke={T.amberLight} strokeWidth="3" />
+              </pattern>
             </defs>
 
             {/* ── Régions ── */}
@@ -460,7 +647,7 @@ export default function CameroonMap({ sourcePositions, periodeMs = PERIODE_MS }:
                 Rendus UNIQUEMENT si une source de positions mesurées est
                 branchée. Sans source, ce groupe est vide : la carte n'invente
                 aucune position. */}
-            {sourcePositions && (
+            {(sourcePositions || simule) && (
               <g>
                 {positions.map(a => {
                   const p = projeterCM(a.lat, a.lng);
@@ -475,11 +662,17 @@ export default function CameroonMap({ sourcePositions, periodeMs = PERIODE_MS }:
                       </title>
                       <g className="cm-aeronef__glyphe"
                          transform={`rotate(${a.cap_deg ?? 0})`}>
-                        <path d="M0,-13 L4,-2 L15,4 L15,7 L4,4 L3,11 L7,14 L7,16 L0,14 L-7,16 L-7,14 L-3,11 L-4,4 L-15,7 L-15,4 L-4,-2 Z"
-                              fill={T.amberLight} stroke={T.bgCard} strokeWidth={1.2} />
+                        <path d="M0,-15 L5,-3 L17,5 L17,8 L5,5 L4,13 L8,16 L8,18 L0,16 L-8,18 L-8,16 L-4,13 L-5,5 L-17,8 L-17,5 L-5,-3 Z"
+                              fill={simule ? 'url(#cmHachures)' : T.amberLight}
+                              stroke={simule ? T.amber : T.bgCard} strokeWidth={1.4} />
                       </g>
-                      <text x={20} y={5} fontFamily={T.mono} fontSize={18} fill={T.amber}>
+                      <text x={22} y={2} fontFamily={T.mono} fontSize={19}
+                            fontWeight={600} fill={T.amber}>
                         {a.immatriculation}
+                      </text>
+                      <text x={22} y={22} fontFamily={T.mono} fontSize={15} fill={T.textDim}>
+                        {a.alt_ft ? `FL${Math.round(a.alt_ft / 100)}` : ''}
+                        {a.vitesse_kt ? ` · ${a.vitesse_kt} kt` : ''}
                       </text>
                     </g>
                   );
@@ -487,6 +680,21 @@ export default function CameroonMap({ sourcePositions, periodeMs = PERIODE_MS }:
               </g>
             )}
           </svg>
+
+          {/* Bandeau de simulation — délibérément non masquable tant que le
+              mode est actif. C'est ce qui manquait à la version précédente. */}
+          {simule && (
+            <div style={{
+              position: 'absolute', top: 20, left: 20, zIndex: 2,
+              display: 'inline-flex', alignItems: 'center', gap: 8,
+              padding: '5px 11px', borderRadius: 4,
+              background: T.amberBg, border: `1px solid ${T.amberBorder}`,
+              fontFamily: T.mono, fontSize: 10, letterSpacing: '0.1em',
+              color: T.amber, fontWeight: 700,
+            }}>
+              SIMULATION · ×{acceleration}
+            </div>
+          )}
 
           {chargement && (
             <div style={{
@@ -549,8 +757,8 @@ export default function CameroonMap({ sourcePositions, periodeMs = PERIODE_MS }:
    affichée en permanence. C'est précisément ce qui manquait.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-function EtatSource({ enDirect, branchee, erreur, maj, periodeMs }: {
-  enDirect: boolean; branchee: boolean;
+function EtatSource({ enDirect, branchee, simule, erreur, maj, periodeMs }: {
+  enDirect: boolean; branchee: boolean; simule: boolean;
   erreur: string | null; maj: Date | null; periodeMs: number;
 }): React.ReactElement {
   const couleur = erreur ? T.red : enDirect ? T.green : T.amberLight;
@@ -558,7 +766,9 @@ function EtatSource({ enDirect, branchee, erreur, maj, periodeMs }: {
     ? erreur
     : enDirect
       ? 'Positions en direct'
-      : 'Aucune source de position — liaisons issues du plan de vol';
+      : simule
+        ? 'Aéronefs de démonstration — positions calculées'
+        : 'Aucune source de position — liaisons issues du plan de vol';
 
   return (
     <div style={{ minWidth: 250 }}>
@@ -571,9 +781,10 @@ function EtatSource({ enDirect, branchee, erreur, maj, periodeMs }: {
         {texte}
       </div>
 
-      {!branchee && !erreur && (
+      {simule && !erreur && (
         <div style={{ fontSize: 9.5, color: T.textDim, marginTop: 4, lineHeight: 1.5 }}>
-          Les tracés indiquent des liaisons actives, non des positions d&apos;aéronefs.
+          Passez <code style={{ fontFamily: T.mono }}>simulation={'{false}'}</code> pour
+          les retirer.
         </div>
       )}
 
@@ -623,6 +834,7 @@ function Legende(): React.ReactElement {
     { c: T.blue,       t: 'Vol planifié',     d: 'Trait discontinu' },
     { c: T.red,        t: 'Vol sensible',     d: 'Verrou CEMAA' },
     { c: T.textDim,    t: 'Base au repos',    d: 'Aucune liaison' },
+    { c: T.amberLight, t: 'Aéronef simulé',   d: 'Glyphe hachuré' },
   ];
 
   return (

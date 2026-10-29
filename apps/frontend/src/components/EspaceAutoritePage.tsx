@@ -140,7 +140,7 @@ export default function EspaceAutoritePage({
         masse_bloquee_kg: typeConsigne === 'MATERIEL' ? mat.poids_kg : 0,
       });
 
-      toast.success('Consigne {autorite} transmise — préremplissage forcé activé dans le manifeste');
+      toast.success(`Consigne ${autorite} transmise — préremplissage forcé activé dans le manifeste`);
       setConsignesEnvoyees(prev => [{
         id: Date.now().toString(),
         type: typeConsigne,
@@ -329,7 +329,7 @@ export default function EspaceAutoritePage({
             fontWeight: 700, cursor: (!volId || submitting) ? 'not-allowed' : 'pointer',
             opacity: (!volId || submitting) ? 0.6 : 1,
             letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-            {submitting ? 'Transmission…' : '{sigle} Émettre la consigne {autorite}'}
+            {submitting ? 'Transmission…' : `${sigle} Émettre la consigne ${autorite}`}
           </button>
         </div>
 

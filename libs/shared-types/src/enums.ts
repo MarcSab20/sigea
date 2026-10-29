@@ -1,19 +1,56 @@
+// libs/shared-types/src/enums.ts
+//
+// Miroir TypeScript des enums PostgreSQL. Les valeurs DOIVENT correspondre
+// caractère pour caractère à prisma/schema.prisma.
+
 export enum RoleUtilisateur {
-  CHEF_ESCALE = 'chef_escale',
+  COMBASE     = 'combase',
   COMEA       = 'comea',
-  COMESO      = 'comeso',
+  SCOPS       = 'scops',
+  COMRMIA     = 'comrmia',
+  ADJ_AIR     = 'adj_air',
+  SEC_ADJ_AIR = 'sec_adj_air',
+  COMSECBASE  = 'comsecbase',
   COMGMO      = 'comgmo',
   COMBORD     = 'combord',
-  COMBASE     = 'combase',
   CEMAA       = 'cemaa',
   MAGE        = 'mage',
   ADMIN       = 'admin',
 }
 
+/** Planification d'un vol. */
 export const ROLES_CREATION_VOL: readonly RoleUtilisateur[] = [
-  RoleUtilisateur.ADMIN,
+  RoleUtilisateur.COMBASE,
   RoleUtilisateur.COMEA,
-  RoleUtilisateur.COMGMO,
+  RoleUtilisateur.ADMIN,
+] as const;
+
+/**
+ * SEUL rôle habilité à SAISIR — potentialités, lignes de liste, fret.
+ *
+ * Constante à un élément, et non test direct sur le rôle, pour deux raisons :
+ * elle est lue par l'IHM, qui n'affiche les formulaires que pour ces rôles ;
+ * et si une délégation devait un jour ouvrir la saisie à un autre poste, le
+ * changement tiendrait en une ligne, au lieu d'être dispersé dans cinq
+ * contrôleurs.
+ */
+export const ROLES_SAISIE: readonly RoleUtilisateur[] = [
+  RoleUtilisateur.SEC_ADJ_AIR,
+] as const;
+
+/** Chaîne RMIA. Périmètre = une RMIA, jamais une base. */
+export const ROLES_RMIA: readonly RoleUtilisateur[] = [
+  RoleUtilisateur.COMRMIA,
+  RoleUtilisateur.ADJ_AIR,
+  RoleUtilisateur.SEC_ADJ_AIR,
+] as const;
+
+/** Périmètre national. */
+export const ROLES_PERIMETRE_NATIONAL: readonly RoleUtilisateur[] = [
+  RoleUtilisateur.SCOPS,
+  RoleUtilisateur.CEMAA,
+  RoleUtilisateur.MAGE,
+  RoleUtilisateur.ADMIN,
 ] as const;
 
 export const ROLES_AUTORITE_CENTRALE: readonly RoleUtilisateur[] = [
@@ -25,69 +62,134 @@ export const ROLES_AVEC_ESCADRON: readonly RoleUtilisateur[] = [
   RoleUtilisateur.COMEA,
 ] as const;
 
-export enum StatutManifeste {
-  BROUILLON     = 'BROUILLON',
-  SOUMIS        = 'SOUMIS',
-  EN_VALIDATION = 'EN_VALIDATION',
-  VALIDE        = 'VALIDE',
-  REJETE        = 'REJETE',
-}
-
-export enum EtapeValidation {
-  CHEF_ESCALE    = 'CHEF_ESCALE',
-  COMESO         = 'COMESO',
-  COMGMO         = 'COMGMO',
-  COMBORD        = 'COMBORD',
-  CEMAA_SENSIBLE = 'CEMAA_SENSIBLE',
-  /**
-   * Étape HISTORIQUE, jamais produite depuis le lot 4.
-   *
-   * Déclarée uniquement pour rester alignée sur l'enum PostgreSQL et pour que
-   * les manifestes signés avant le lot 4 restent lisibles. Voir
-   * ETAPES_HISTORIQUES (circuit.ts) : toute valeur listée là ne peut plus
-   * apposer de tampon — composerTampon() lève une exception si on essaie.
-   */
-  MAGE_SENSIBLE  = 'MAGE_SENSIBLE',
-  COMBASE        = 'COMBASE',
-}
-
 /**
- * Autorité centrale émettrice d'une consigne.
- *
- * Distincte de RoleUtilisateur à dessein : le rôle dit QUI se connecte,
- * l'autorité dit AU NOM DE QUOI une consigne est émise. Les deux se
- * correspondent aujourd'hui un pour un (AUTORITE_TO_ROLE, circuit.ts), mais
- * les confondre interdirait plus tard qu'un officier délégué émette au nom
- * du MAGE — exactement le cas que le gestionnaire d'intérim doit couvrir.
+ * Rôles auxquels le COMBASE peut déléguer la discrimination de son étape.
+ * La signature imprimée reste celle du COMBASE ; seule la note de délégation,
+ * non imprimée, mentionne le délégataire.
  */
-export enum AutoriteCentrale {
-  CEMAA = 'CEMAA',
-  MAGE  = 'MAGE',
+export const ROLES_DELEGATAIRES_COMBASE: readonly RoleUtilisateur[] = [
+  RoleUtilisateur.COMGMO,
+  RoleUtilisateur.COMSECBASE,
+] as const;
+
+// ─── Régions militaires interarmées ────────────────────────────────────────
+
+export enum Rmia {
+  RMIA_1 = 'RMIA_1',
+  RMIA_2 = 'RMIA_2',
+  RMIA_3 = 'RMIA_3',
+  RMIA_4 = 'RMIA_4',
+  RMIA_5 = 'RMIA_5',
 }
 
-export enum MentionSignature {
-  VU     = 'VU',
-  ACCORD = 'ACCORD',
-}
+// ─── Vol ───────────────────────────────────────────────────────────────────
 
 export enum StatutVol {
   PLANIFIE = 'PLANIFIE',
+  DIFFUSE  = 'DIFFUSE',
   EN_COURS = 'EN_COURS',
   CLOTURE  = 'CLOTURE',
   ANNULE   = 'ANNULE',
 }
 
-export enum StatutValidation {
-  EN_ATTENTE = 'EN_ATTENTE',
-  APPROUVE   = 'APPROUVE',
-  REJETE     = 'REJETE',
+export enum TypeMission {
+  PROJECTION  = 'PROJECTION',
+  PARA        = 'PARA',
+  LIAISON     = 'LIAISON',
+  LOGISTIQUE  = 'LOGISTIQUE',
+  EVASAN      = 'EVASAN',
+  VIP         = 'VIP',
+  OP_SENSIBLE = 'OP_SENSIBLE',
 }
 
-export enum TypeMouvement {
-  MUTATION      = 'MUTATION',
-  DEPART        = 'DEPART',
-  SUSPENSION    = 'SUSPENSION',
-  REINTEGRATION = 'REINTEGRATION',
+// ─── Listes ────────────────────────────────────────────────────────────────
+
+export enum EtapeListe {
+  SEC_ADJ_AIR = 'SEC_ADJ_AIR',
+  ADJ_AIR     = 'ADJ_AIR',
+  COMRMIA     = 'COMRMIA',
+  COMBASE     = 'COMBASE',
+  COMBORD     = 'COMBORD',
+}
+
+export enum StatutListe {
+  OUVERTE       = 'OUVERTE',
+  EN_VALIDATION = 'EN_VALIDATION',
+  ARRETEE       = 'ARRETEE',
+  CLOTUREE      = 'CLOTUREE',
+  REJETEE       = 'REJETEE',
+}
+
+export enum NatureLigne {
+  HIERARCHISEE = 'HIERARCHISEE',
+  ATTENTE      = 'ATTENTE',
+  RETIREE      = 'RETIREE',
+}
+
+export enum Priorite {
+  P1 = 'P1', P2 = 'P2', P3 = 'P3',
+  P4 = 'P4', P5 = 'P5', P6 = 'P6',
+}
+
+/** Ordre d'impression et d'appel. Source unique : ne jamais trier sur la chaîne. */
+export const PRIORITES_ORDONNEES: readonly Priorite[] = [
+  Priorite.P1, Priorite.P2, Priorite.P3,
+  Priorite.P4, Priorite.P5, Priorite.P6,
+] as const;
+
+export enum StatutPotentialite {
+  DISPONIBLE = 'DISPONIBLE',
+  RETENUE    = 'RETENUE',
+  ARCHIVEE   = 'ARCHIVEE',
+}
+
+/** Enum de mention UNIQUE : visas de liste et visa du manifeste. */
+export enum MentionVisa {
+  VU        = 'VU',
+  SIGNATURE = 'SIGNATURE',
+  ACCORD    = 'ACCORD',
+  VISA      = 'VISA',
+}
+
+// ─── Manifeste ─────────────────────────────────────────────────────────────
+
+export enum StatutManifeste {
+  /** Émis à l'arrêté du COMBASE, en attente du visa du commandant de bord. */
+  EMIS      = 'EMIS',
+  /** Visé par le COMBORD. Document opposable. */
+  DEFINITIF = 'DEFINITIF',
+  ANNULE    = 'ANNULE',
+}
+
+export enum StatutMessage {
+  EN_ATTENTE = 'EN_ATTENTE',
+  ENVOYE     = 'ENVOYE',
+  ECHEC      = 'ECHEC',
+}
+
+// ─── Autorités centrales et divers ─────────────────────────────────────────
+
+export enum OrigineEnregistrement {
+  SAISIE = 'SAISIE',
+  CEMAA  = 'CEMAA',
+  MAGE   = 'MAGE',
+}
+
+export enum AutoriteCentrale {
+  CEMAA = 'CEMAA',
+  MAGE  = 'MAGE',
+}
+
+export enum StatutConsigne {
+  EMISE        = 'EMISE',
+  REALISEE     = 'REALISEE',
+  NON_REALISEE = 'NON_REALISEE',
+  ANNULEE      = 'ANNULEE',
+}
+
+export enum TypeConsigne {
+  PERSONNEL = 'PERSONNEL',
+  MATERIEL  = 'MATERIEL',
 }
 
 export enum CategoriePassager {
@@ -102,41 +204,12 @@ export enum CategoriePassager {
   OP_SENSIBLE  = 'OP_SENSIBLE',
 }
 
-export enum TypeMission {
-  PROJECTION     = 'PROJECTION',
-  PARA           = 'PARA',
-  LIAISON        = 'LIAISON',
-  LOGISTIQUE     = 'LOGISTIQUE',
-  EVASAN         = 'EVASAN',
-  VIP            = 'VIP',
-  OP_SENSIBLE    = 'OP_SENSIBLE',
-}
-
-export enum TypeConsigne {
-  PERSONNEL = 'PERSONNEL',
-  MATERIEL  = 'MATERIEL',
-}
-
-export enum OrigineEnregistrement {
-  SAISIE = 'SAISIE',
-  CEMAA  = 'CEMAA',
-  /** Ligne imposée par le MAGE. Cloisonnée de celle du CEMAA. */
-  MAGE   = 'MAGE',
-}
-
-export enum NiveauConfidentialite {
-  NON_CLASSIFIE         = 'NON_CLASSIFIE',
-  DIFFUSION_RESTREINTE  = 'DIFFUSION_RESTREINTE',
-  CONFIDENTIEL_DEFENSE  = 'CONFIDENTIEL_DEFENSE',
-  SENSIBLE_CEMAA        = 'SENSIBLE_CEMAA',
-}
-
 export enum TypeMissionLogistique {
-  AA              = 'AA',
-  IA              = 'IA',
+  AA               = 'AA',
+  IA               = 'IA',
   INTERMINISTERIEL = 'INTERMINISTERIEL',
-  INDIVIDUEL      = 'INDIVIDUEL',
-  SENSIBLE_CEMAA  = 'SENSIBLE_CEMAA',
+  INDIVIDUEL       = 'INDIVIDUEL',
+  SENSIBLE_CEMAA   = 'SENSIBLE_CEMAA',
 }
 
 export enum FonctionEquipage {
@@ -146,10 +219,16 @@ export enum FonctionEquipage {
   AUTRE      = 'AUTRE',
 }
 
-/** Suivi d'exécution d'une consigne d'autorité centrale. */
-export enum StatutConsigne {
-  EMISE        = 'EMISE',
-  REALISEE     = 'REALISEE',
-  NON_REALISEE = 'NON_REALISEE',
-  ANNULEE      = 'ANNULEE',
+export enum TypeMouvement {
+  MUTATION      = 'MUTATION',
+  DEPART        = 'DEPART',
+  SUSPENSION    = 'SUSPENSION',
+  REINTEGRATION = 'REINTEGRATION',
+}
+
+export enum NiveauConfidentialite {
+  NON_CLASSIFIE        = 'NON_CLASSIFIE',
+  DIFFUSION_RESTREINTE = 'DIFFUSION_RESTREINTE',
+  CONFIDENTIEL_DEFENSE = 'CONFIDENTIEL_DEFENSE',
+  SENSIBLE_CEMAA       = 'SENSIBLE_CEMAA',
 }

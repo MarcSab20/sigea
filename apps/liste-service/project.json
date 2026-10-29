@@ -1,0 +1,38 @@
+{
+  "name": "liste-service",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/liste-service/src",
+  "projectType": "application",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "options": {
+        "outputPath": "dist/apps/liste-service",
+        "main": "apps/liste-service/src/main.ts",
+        "tsConfig": "apps/liste-service/tsconfig.app.json"
+      }
+    },
+    "serve": {
+      "executor": "@nx/js:node",
+      "options": { "buildTarget": "liste-service:build" }
+    },
+    "test": {
+      "executor": "@nx/jest:jest",
+      "options": { "jestConfig": "apps/liste-service/jest.config.ts" }
+    },
+    "lint": {
+      "executor": "@nx/eslint:lint",
+      "options": { "lintFilePatterns": ["apps/liste-service/**/*.ts"] }
+    }
+  },
+  "tags": ["type:app", "scope:liste-service"],
+  "implicitDependencies": [
+    "shared-audit",
+    "shared-auth",
+    "shared-database",
+    "shared-events",
+    "shared-integrity",
+    "shared-messaging",
+    "shared-types"
+  ]
+}

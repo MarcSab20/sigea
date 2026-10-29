@@ -1,8 +1,10 @@
 // apps/pdf-service/src/pdf/pdf.service.ts
+
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import * as puppeteer from 'puppeteer';
 import { NiveauConfidentialite } from '@sigea/shared-types';
 import { renderManifesteHtml, ManifesteRenderData } from './manifeste-template';
+import { renderListeHtml, ListeRenderData } from './liste-template';
 
 @Injectable()
 export class PdfService implements OnModuleDestroy {
@@ -26,15 +28,8 @@ export class PdfService implements OnModuleDestroy {
           headless: true,
           args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--disable-dev-shm-usage'],
         })
-        .then((b) => {
-          this.browser = b;
-          this.launching = undefined;
-          return b;
-        })
-        .catch((e) => {
-          this.launching = undefined;
-          throw e;
-        });
+        .then((b) => { this.browser = b; this.launching = undefined; return b; })
+        .catch((e) => { this.launching = undefined; throw e; });
     }
     return this.launching;
   }
@@ -43,9 +38,25 @@ export class PdfService implements OnModuleDestroy {
     data: ManifesteRenderData,
     niveau: NiveauConfidentialite,
   ): Promise<Buffer> {
-    const html = renderManifesteHtml(data, this.getWatermark(niveau));
-    const pdf = await this.htmlToPdf(html);
-    this.logger.log(`PDF manifeste ${data.id} généré (niveau=${niveau}, ${pdf.length} o)`);
+    const pdf = await this.htmlToPdf(renderManifesteHtml(data, this.watermark(niveau)));
+    this.logger.log(`PDF manifeste ${data.numero} généré (niveau=${niveau}, ${pdf.length} o)`);
+    return pdf;
+  }
+
+  /**
+   * Liste hiérarchisée.
+   *
+   * Même pipeline que le manifeste, gabarit différent : les deux documents ont
+   * des structures distinctes et doivent le rester. Partager la génération mais
+   * pas le gabarit est exactement le bon découpage — Chromium coûte cher à
+   * lancer, le HTML ne coûte rien à dupliquer.
+   */
+  async generateListe(
+    data: ListeRenderData,
+    niveau: NiveauConfidentialite,
+  ): Promise<Buffer> {
+    const pdf = await this.htmlToPdf(renderListeHtml(data, this.watermark(niveau)));
+    this.logger.log(`PDF liste ${data.id} généré (niveau=${niveau}, ${pdf.length} o)`);
     return pdf;
   }
 
@@ -69,12 +80,12 @@ export class PdfService implements OnModuleDestroy {
     }
   }
 
-  private getWatermark(niveau: NiveauConfidentialite): string {
+  private watermark(niveau: NiveauConfidentialite): string {
     const map: Record<NiveauConfidentialite, string> = {
-      [NiveauConfidentialite.NON_CLASSIFIE]: '',
+      [NiveauConfidentialite.NON_CLASSIFIE]:        '',
       [NiveauConfidentialite.DIFFUSION_RESTREINTE]: 'DIFFUSION RESTREINTE',
       [NiveauConfidentialite.CONFIDENTIEL_DEFENSE]: 'CONFIDENTIEL DÉFENSE',
-      [NiveauConfidentialite.SENSIBLE_CEMAA]: 'SENSIBLE CEMAA',
+      [NiveauConfidentialite.SENSIBLE_CEMAA]:       'SENSIBLE CEMAA',
     };
     return map[niveau] ?? '';
   }

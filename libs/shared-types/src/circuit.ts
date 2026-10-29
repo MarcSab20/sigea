@@ -1,51 +1,67 @@
+// libs/shared-types/src/circuit.ts
+//
+// Circuit du MANIFESTE.
+//
+// ═══════════════════════════════════════════════════════════════════════════
+// CE QUI CHANGE
+// ═══════════════════════════════════════════════════════════════════════════
+// Le manifeste ne circule plus. C'est la LISTE HIÉRARCHISÉE qui circule, du
+// secrétaire de l'Adjoint Air au commandant de base — voir circuit-liste.ts.
+// Le manifeste en est l'EXTRAIT, émis à l'arrêté du COMBASE, et il ne porte
+// qu'une signature : celle du commandant de bord, à la fin du document.
+//
+// ETAPE_SEQUENCE ne compte donc plus qu'une étape. Ce n'est pas une
+// simplification de confort : tant que la séquence en comptait cinq, le PDF
+// imprimait cinq blocs de signature, et la directive en exige un seul.
+//
+// Les valeurs CHEF_ESCALE / COMESO / COMGMO / COMBASE restent déclarées dans
+// l'enum, et ETAPES_HISTORIQUES les recense : des manifestes signés sous
+// l'ancien circuit les portent, et les écrans d'historique doivent savoir les
+// afficher sans les confondre avec des étapes vivantes. `composerTampon()`
+// lève si on tente d'en produire une nouvelle.
+
 import { EtapeValidation, MentionSignature, RoleUtilisateur, AutoriteCentrale } from './enums';
 
-// ─── Ordre du circuit ──────────────────────────────────────────────────────
+// ─── Séquence ──────────────────────────────────────────────────────────────
+
+/** Unique étape du circuit manifeste : le visa du commandant de bord. */
+export const ETAPE_SEQUENCE: readonly EtapeValidation[] = [
+  EtapeValidation.COMBORD,
+] as const;
+
+/** Blocs de signature imprimés sur le manifeste. Un seul, en pied de document. */
+export const BLOCS_SIGNATURE: readonly EtapeValidation[] = ETAPE_SEQUENCE;
 
 /**
- * Séquence du circuit, du dépôt à la signature finale.
+ * Étapes plus jamais produites.
  *
- * IDENTIQUE POUR TOUS LES VOLS, sensibles compris.
- *
- * ── Correction du lot 3 ──
- * J'avais intercalé CEMAA_SENSIBLE puis MAGE_SENSIBLE comme des étapes, pour
- * les manifestes sensibles. C'était faux. L'autorité qui émet une consigne ne
- * SIGNE pas le manifeste : elle CONFIRME que sa consigne a été exécutée. Ce
- * n'est pas un visa, c'est un accusé d'exécution — aucun tampon n'est apposé
- * à ce titre.
- *
- * Le contrôle correspondant vit donc sur la CONSIGNE (StatutConsigne) et non
- * dans cette séquence. Voir ETAPE_BLOQUEE_PAR_CONSIGNE ci-dessous.
+ * Les quatre étapes de l'ancien circuit y entrent : leurs attributions sont
+ * désormais exercées sur la LISTE, pas sur le manifeste.
  */
-export const ETAPE_SEQUENCE: readonly EtapeValidation[] = [
+export const ETAPES_HISTORIQUES: readonly EtapeValidation[] = [
   EtapeValidation.CHEF_ESCALE,
   EtapeValidation.COMESO,
   EtapeValidation.COMGMO,
   EtapeValidation.COMBASE,
-  EtapeValidation.COMBORD,
+  EtapeValidation.CEMAA_SENSIBLE,
+  EtapeValidation.MAGE_SENSIBLE,
 ] as const;
 
-/** Les 5 blocs de signature imprimés sur le manifeste, dans l'ordre du document. */
-export const BLOCS_SIGNATURE: readonly EtapeValidation[] = ETAPE_SEQUENCE;
+export function estEtapeHistorique(etape: EtapeValidation): boolean {
+  return ETAPES_HISTORIQUES.includes(etape);
+}
 
 // ─── Consignes d'autorité centrale ─────────────────────────────────────────
 
 /**
- * Étape que le manifeste ne peut franchir tant qu'une consigne reste non
- * confirmée par son émetteur.
+ * Étape que le manifeste ne peut franchir tant qu'une consigne d'autorité
+ * reste non confirmée.
  *
- * ── Pourquoi le COMBASE ──
- * C'est lui qui donne l'ACCORD, seul acte de commandement du circuit. Une
- * consigne du CEMAA ou du MAGE non exécutée doit l'arrêter avant qu'il engage
- * son accord, pas après.
- *
- * ── Comment déplacer ce point ──
- * Une seule ligne. Si la vérification doit plutôt intervenir juste avant la
- * clôture par le commandant de bord — au motif qu'il s'agit de constater ce
- * qui est réellement à bord —, remplacez par COMBORD. Rien d'autre à changer :
- * la state machine lit cette constante, elle ne code aucune étape en dur.
+ * Elle était portée par le COMBASE, qui ne signe plus le manifeste. Le verrou
+ * passe au COMBORD, dernier et seul signataire — et c'est d'ailleurs plus juste :
+ * il s'agit de constater ce qui est réellement à bord.
  */
-export const ETAPE_BLOQUEE_PAR_CONSIGNE: EtapeValidation = EtapeValidation.COMBASE;
+export const ETAPE_BLOQUEE_PAR_CONSIGNE: EtapeValidation = EtapeValidation.COMBORD;
 
 export const AUTORITE_TO_ROLE: Readonly<Record<AutoriteCentrale, RoleUtilisateur>> = {
   [AutoriteCentrale.CEMAA]: RoleUtilisateur.CEMAA,
@@ -57,83 +73,44 @@ export const ROLE_TO_AUTORITE: Readonly<Partial<Record<RoleUtilisateur, Autorite
   [RoleUtilisateur.MAGE]:  AutoriteCentrale.MAGE,
 } as const;
 
-/**
- * Étapes historiques, plus jamais produites.
- *
- * Conservées parce que des lignes ValidationEtape existantes portent
- * CEMAA_SENSIBLE : les effacer détruirait la piste d'audit de manifestes déjà
- * signés. Cette liste sert aux écrans d'historique, qui doivent savoir les
- * afficher sans les confondre avec des étapes vivantes.
- */
-export const ETAPES_HISTORIQUES: readonly EtapeValidation[] = [
-  EtapeValidation.CEMAA_SENSIBLE,
-  EtapeValidation.MAGE_SENSIBLE,
-] as const;
-
-export function estEtapeHistorique(etape: EtapeValidation): boolean {
-  return ETAPES_HISTORIQUES.includes(etape);
-}
-
 // ─── Correspondance rôle ⇄ étape ───────────────────────────────────────────
 
 /**
- * COMEA, CEMAA et MAGE sont ABSENTS de cette table, et c'est le mécanisme même
- * de leur exclusion du circuit : `ROLE_TO_ETAPE[role]` vaut undefined, et la
- * state machine refuse la validation. Aucune règle supplémentaire à écrire.
- *
- * Le COMEA planifie les vols. Le CEMAA et le MAGE émettent des consignes et en
- * confirment l'exécution. Aucun des trois n'appose de tampon.
+ * Seul le COMBORD figure ici, et c'est le mécanisme même de l'exclusion de tous
+ * les autres : `ROLE_TO_ETAPE[role]` vaut `undefined`, et la machine à états
+ * refuse la validation. Aucune règle supplémentaire à écrire.
  */
 export const ROLE_TO_ETAPE: Readonly<Partial<Record<RoleUtilisateur, EtapeValidation>>> = {
-  [RoleUtilisateur.CHEF_ESCALE]: EtapeValidation.CHEF_ESCALE,
-  [RoleUtilisateur.COMESO]:      EtapeValidation.COMESO,
-  [RoleUtilisateur.COMGMO]:      EtapeValidation.COMGMO,
-  [RoleUtilisateur.COMBORD]:     EtapeValidation.COMBORD,
-  [RoleUtilisateur.COMBASE]:     EtapeValidation.COMBASE,
+  [RoleUtilisateur.COMBORD]: EtapeValidation.COMBORD,
 } as const;
 
 export const ETAPE_TO_ROLE: Readonly<Partial<Record<EtapeValidation, RoleUtilisateur>>> = {
-  [EtapeValidation.CHEF_ESCALE]: RoleUtilisateur.CHEF_ESCALE,
-  [EtapeValidation.COMESO]:      RoleUtilisateur.COMESO,
-  [EtapeValidation.COMGMO]:      RoleUtilisateur.COMGMO,
-  [EtapeValidation.COMBORD]:     RoleUtilisateur.COMBORD,
-  [EtapeValidation.COMBASE]:     RoleUtilisateur.COMBASE,
+  [EtapeValidation.COMBORD]: RoleUtilisateur.COMBORD,
 } as const;
 
-// ─── Composition des tampons ───────────────────────────────────────────────
+// ─── Tampon ────────────────────────────────────────────────────────────────
 
-export const TITRE_TAMPON: Readonly<Partial<Record<EtapeValidation, string>>> = {
-  [EtapeValidation.CHEF_ESCALE]: 'COMESCALE',
-  [EtapeValidation.COMESO]:      'COMESO',
-  [EtapeValidation.COMGMO]:      'COMGMO',
-} as const;
-
-/** Mention portée par le tampon : ACCORD pour le COMBASE, VU pour les autres. */
 export const MENTION_TAMPON: Readonly<Record<EtapeValidation, MentionSignature>> = {
-  [EtapeValidation.CHEF_ESCALE]: MentionSignature.VU,
-  [EtapeValidation.COMESO]:      MentionSignature.VU,
-  [EtapeValidation.COMGMO]:      MentionSignature.VU,
-  [EtapeValidation.COMBORD]:     MentionSignature.VU,
-  [EtapeValidation.COMBASE]:     MentionSignature.ACCORD,
-  // Historiques — jamais imprimées. Présentes parce que le Record est total.
+  [EtapeValidation.COMBORD]:        MentionSignature.VU,
+  [EtapeValidation.CHEF_ESCALE]:    MentionSignature.VU,
+  [EtapeValidation.COMESO]:         MentionSignature.VU,
+  [EtapeValidation.COMGMO]:         MentionSignature.VU,
+  [EtapeValidation.COMBASE]:        MentionSignature.ACCORD,
   [EtapeValidation.CEMAA_SENSIBLE]: MentionSignature.VU,
   [EtapeValidation.MAGE_SENSIBLE]:  MentionSignature.VU,
 } as const;
 
 export const LIBELLE_ETAPE: Readonly<Record<EtapeValidation, string>> = {
-  [EtapeValidation.CHEF_ESCALE]: "Chef d'escale",
-  [EtapeValidation.COMESO]:      'COMESO',
-  [EtapeValidation.COMGMO]:      'COMGMO',
-  [EtapeValidation.COMBORD]:     'Commandant de bord',
-  [EtapeValidation.COMBASE]:     'Commandant de base',
+  [EtapeValidation.COMBORD]:        'Commandant de bord',
+  [EtapeValidation.CHEF_ESCALE]:    "Chef d'escale (étape historique)",
+  [EtapeValidation.COMESO]:         'COMESO (étape historique)',
+  [EtapeValidation.COMGMO]:         'COMGMO (étape historique)',
+  [EtapeValidation.COMBASE]:        'Commandant de base (étape historique)',
   [EtapeValidation.CEMAA_SENSIBLE]: 'CEMAA (étape historique)',
   [EtapeValidation.MAGE_SENSIBLE]:  'MAGE (étape historique)',
 } as const;
 
-/** Mention imprimée sur le tampon lorsqu'il est apposé par un suppléant. */
 export const MENTION_INTERIM = 'P/I';
-
-// ─── Contenu d'un tampon, figé à la signature ──────────────────────────────
 
 export interface EmpreinteTampon {
   mention:          MentionSignature;
@@ -160,98 +137,50 @@ export interface ContexteSignature {
 }
 
 /**
- * Compose le contenu du tampon à apposer.
+ * Compose le tampon du commandant de bord — le seul encore apposé.
  *
- * Le résultat est destiné à être PERSISTÉ dans ValidationEtape, pas recalculé
- * à l'impression : un COMGMO muté ne doit pas modifier rétroactivement le
- * tampon d'un manifeste déjà signé.
- *
- * Les étapes historiques ne passent JAMAIS par ici — le garde en tête
- * transforme un appel erroné en erreur immédiate, plutôt qu'en tampon fantôme
- * sur un document officiel.
+ * Le résultat est PERSISTÉ dans ValidationEtape, pas recalculé à l'impression :
+ * un commandant de bord muté ne doit pas modifier rétroactivement le visa d'un
+ * manifeste déjà clos.
  */
 export function composerTampon(ctx: ContexteSignature): EmpreinteTampon {
   if (estEtapeHistorique(ctx.etape)) {
     throw new Error(
-      `L'étape ${ctx.etape} n'est plus produite et n'appose aucun tampon`,
+      `L'étape ${ctx.etape} n'est plus produite et n'appose aucun tampon. ` +
+        'Les attributions correspondantes sont exercées sur la liste hiérarchisée.',
     );
   }
   if (ctx.par_interim && !ctx.titulaire_nom) {
     throw new Error('Tampon par intérim : nom du titulaire requis');
   }
+  if (!ctx.immatriculation) {
+    throw new Error('Tampon COMBORD : immatriculation requise');
+  }
 
-  const base = {
+  return {
     mention:          MENTION_TAMPON[ctx.etape],
+    tampon_ligne1:    `${ctx.signataire_grade} ${ctx.signataire_nom}`.trim(),
+    tampon_ligne2:    ctx.immatriculation,
     signataire_nom:   ctx.signataire_nom,
     signataire_grade: ctx.signataire_grade,
     par_interim:      ctx.par_interim === true,
     titulaire_nom:    ctx.par_interim ? ctx.titulaire_nom   : undefined,
     titulaire_grade:  ctx.par_interim ? ctx.titulaire_grade : undefined,
   };
-
-  switch (ctx.etape) {
-    case EtapeValidation.COMBORD: {
-      if (!ctx.immatriculation) {
-        throw new Error('Tampon COMBORD : immatriculation requise');
-      }
-      return {
-        ...base,
-        tampon_ligne1: `${ctx.signataire_grade} ${ctx.signataire_nom}`.trim(),
-        tampon_ligne2: ctx.immatriculation,
-      };
-    }
-
-    case EtapeValidation.COMBASE:
-      return {
-        ...base,
-        tampon_ligne1: `${ctx.signataire_grade} ${ctx.signataire_nom}`.trim(),
-        tampon_ligne2: ctx.base_code,
-      };
-
-    default: {
-      const titre = TITRE_TAMPON[ctx.etape];
-      if (!titre) {
-        throw new Error(`Aucun titre de tampon défini pour l'étape ${ctx.etape}`);
-      }
-      return { ...base, tampon_ligne1: `${titre} ${ctx.base_numero}` };
-    }
-  }
 }
 
-// ─── Progression dans le circuit ───────────────────────────────────────────
+// ─── Progression ───────────────────────────────────────────────────────────
 
-/**
- * Étape suivante, ou null si `etape` clôt le circuit.
- *
- * Plus aucune condition sur `flag_sensible` : la progression est la même pour
- * tous les vols. C'est le blocage par consigne non confirmée, et lui seul, qui
- * distingue le cas particulier — et il ne modifie pas la séquence, il l'arrête.
- */
 export function etapeSuivante(etape: EtapeValidation): EtapeValidation | null {
   const i = ETAPE_SEQUENCE.indexOf(etape);
   if (i === -1 || i === ETAPE_SEQUENCE.length - 1) return null;
   return ETAPE_SEQUENCE[i + 1];
 }
 
-/**
- * @deprecated Alias de `etapeSuivante`. Le paramètre `sensible` est ignoré.
- *
- * Conservé pour ne pas casser les appelants issus du lot 3, où les verrous
- * d'autorité étaient — à tort — insérés dans la séquence.
- */
-export function prochaineEtapeCircuit(
-  etape: EtapeValidation,
-  _sensible?: boolean,
-): EtapeValidation | null {
-  return etapeSuivante(etape);
-}
-
-/** Rang 1..n d'une étape dans la séquence ; 0 hors séquence. */
 export function rangEtape(etape: EtapeValidation): number {
   return ETAPE_SEQUENCE.indexOf(etape) + 1;
 }
 
-/** Vrai si `etape` clôt le circuit. */
 export function estEtapeFinale(etape: EtapeValidation): boolean {
   return etape === ETAPE_SEQUENCE[ETAPE_SEQUENCE.length - 1];
 }

@@ -1,17 +1,20 @@
 // apps/manifeste-service/src/manifeste-service.module.ts
+//
+// PassagersModule et MaterielsModule sont RETIRÉS : la saisie appartient au
+// secrétaire de l'Adjoint Air, dans liste-service. Leurs dossiers sont à
+// supprimer du dépôt — les laisser en place exposerait des routes d'écriture
+// qui contournent tout le circuit de validation.
+
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { SharedDatabaseModule } from '@sigea/shared-database';
 import { AuditModule } from '@sigea/shared-audit';
-import { MessagingModule } from '@sigea/shared-messaging';
 import { ManifesteModule } from './manifestes/manifeste.module';
-import { PassagersModule } from './passagers/passagers.module';
-import { MaterielsModule } from './materiels/materiels.module';
+import { ExploitationModule } from './exploitation/exploitation.module';
 import { HealthModule } from './health/health.module';
 import { JwtStrategy } from './strategies/jwt.strategy';
-import { ExploitationModule } from './exploitation/exploitation.module';
 
 @Module({
   imports: [
@@ -25,10 +28,7 @@ import { ExploitationModule } from './exploitation/exploitation.module';
     }),
     SharedDatabaseModule,
     AuditModule,
-    MessagingModule,
     ManifesteModule,
-    PassagersModule,
-    MaterielsModule,
     ExploitationModule,
     HealthModule,
   ],

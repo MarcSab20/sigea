@@ -1,31 +1,51 @@
 // apps/notification-service/src/events/events-consumer.service.ts
-// Consomme l'exchange topic "sigea.events" et traduit chaque évènement métier
-// en diffusion WebSocket vers les rooms de base concernées. Les noms d'évènements
-// émis correspondent EXACTEMENT à ceux écoutés par le front (useWebSocket.ts).
+//
+// Consomme l'exchange « sigea.events » et traduit chaque évènement métier en
+// notification persistée puis diffusée.
+//
+// ═══════════════════════════════════════════════════════════════════════════
+// CE QUI CHANGE
+// ═══════════════════════════════════════════════════════════════════════════
+// Les évènements MANIFESTE_* ont disparu avec le circuit qu'ils décrivaient.
+// Les nouveaux portent sur le VOL (planification, diffusion) et sur la LISTE
+// (ouverture, visa, renvoi, arrêté, clôture).
+//
+// La portée change aussi, et c'est le point important : la plupart de ces
+// évènements s'adressent à une RÉGION, pas à une base. Une liste ouverte à
+// Douala concerne la RMIA 2 tout entière — le secrétaire qui la remplira n'est
+// pas nécessairement affecté à la base de Douala.
+//
+// Enfin, chaque notification nomme l'action attendue plutôt que l'évènement
+// survenu : « Liste à constituer » est un ordre, « liste ouverte » est un
+// constat. Devant vingt lignes, la différence décide si l'on clique ou non.
 
 import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
 import * as amqp from 'amqplib';
-import { EVENTS, CEMAA_EVENTS, ALERT_EVENTS } from '@sigea/shared-events';
+import { VOL_EVENTS, LISTE_EVENTS, CEMAA_EVENTS, ALERT_EVENTS } from '@sigea/shared-events';
 import { SIGEA_EXCHANGE, NOTIFICATION_QUEUE } from '@sigea/shared-messaging';
-import { LIBELLE_ETAPE, EtapeValidation } from '@sigea/shared-types';
+import {
+  TypeNotification, Rmia, EtapeListe, LIBELLE_ETAPE_LISTE, LIBELLE_RMIA,
+} from '@sigea/shared-types';
 import { PrismaService } from '@sigea/shared-database';
 import { NotificationGateway } from '../gateway/notification.gateway';
 import { NotificationService } from '../notifications/notification.service';
 
-interface BaseScopedEvent {
-  manifeste_id?: string;
-  base_id?: string;
-  vol_id?: string;
-  etape?: string;
-  etape_suivante?: string | null;
-  statut?: string;
-  motif?: string;
-}
-
-interface CemaaEvent {
-  consigne_id: string;
-  vol_id: string;
-  manifestes?: Array<{ id: string; base_id: string }>;
+interface EvenementSigea {
+  vol_id?:         string;
+  numero_mission?: string;
+  liste_id?:       string;
+  manifeste_id?:   string;
+  base_id?:        string;
+  rmia?:           Rmia;
+  etape?:          EtapeListe;
+  etape_suivante?: EtapeListe | null;
+  etape_retour?:   EtapeListe;
+  motif?:          string;
+  nb_passagers?:   number;
+  combord_id?:     string;
+  rmia_destinataires?: Rmia[];
+  listes?: { liste_id: string; base_id: string; rmia: Rmia; ordre: number }[];
+  consigne_id?: string;
 }
 
 @Injectable()
@@ -55,7 +75,7 @@ export class EventsConsumer implements OnModuleInit, OnModuleDestroy {
       await this.channel?.close();
       await this.connection?.close();
     } catch {
-      /* best-effort */
+      // Fermeture best-effort.
     }
   }
 
@@ -84,9 +104,8 @@ export class EventsConsumer implements OnModuleInit, OnModuleDestroy {
 
       await channel.consume(NOTIFICATION_QUEUE, (msg) => {
         if (!msg) return;
-        // Traitement async : on ack APRÈS persistance/diffusion réussies.
-        // En cas d'erreur, nack sans requeue (le message part en dead-letter
-        // plutôt que de boucler indéfiniment).
+        // ACK APRÈS persistance et diffusion réussies. En cas d'erreur, nack
+        // sans requeue : le message part en dead-letter plutôt que de boucler.
         void this.handle(msg.fields.routingKey, JSON.parse(msg.content.toString()))
           .then(() => this.channel?.ack(msg))
           .catch((e) => {
@@ -95,10 +114,12 @@ export class EventsConsumer implements OnModuleInit, OnModuleDestroy {
           });
       });
 
-      this.logger.log(`Consommateur prêt (queue "${NOTIFICATION_QUEUE}", exchange "${SIGEA_EXCHANGE}")`);
+      this.logger.log(
+        `Consommateur prêt (queue « ${NOTIFICATION_QUEUE} », exchange « ${SIGEA_EXCHANGE} »)`,
+      );
     } catch (e) {
       this.logger.warn(
-        `RabbitMQ indisponible (${(e as Error).message}) — reconnexion dans 5s`,
+        `RabbitMQ indisponible (${(e as Error).message}) — reconnexion dans 5 s`,
       );
       this.scheduleReconnect();
     } finally {
@@ -111,159 +132,263 @@ export class EventsConsumer implements OnModuleInit, OnModuleDestroy {
     setTimeout(() => void this.connect(), 5000);
   }
 
-  private async handle(routingKey: string, payload: BaseScopedEvent & CemaaEvent): Promise<void> {
+  private async handle(routingKey: string, p: EvenementSigea): Promise<void> {
     switch (routingKey) {
-      // ── Soumission : le circuit démarre, toute la base est informée ──
-      case EVENTS.MANIFESTE_SUBMITTED: {
-        if (!payload.base_id) break;
-        const suivante = this.libelle(payload.etape ?? payload.etape_suivante);
-        await this.notifications.emettre({
-          base_id: payload.base_id,
-          type: 'MANIFESTE_SOUMIS',
-          titre: 'Manifeste soumis',
-          message: suivante
-            ? `Un manifeste attend la validation de ${suivante}.`
-            : 'Un manifeste a été soumis au circuit de validation.',
-          manifeste_id: payload.manifeste_id,
-          vol_id: payload.vol_id,
-          etape: payload.etape_suivante ?? undefined,
+      // ── Planification : le SCOPS doit allouer ──
+      //
+      // Adressée nominativement aux comptes SCOPS, et non diffusée à une base :
+      // un vol non diffusé ne doit être connu que de son créateur et du
+      // sous-chef opérations. Diffuser à la base de départ révélerait un
+      // mouvement que le commandement n'a pas encore arrêté.
+      case VOL_EVENTS.VOL_PLANIFIE: {
+        if (!p.vol_id) break;
+        const scops = await this.prisma.utilisateur.findMany({
+          where: { role: 'scops', actif: true },
+          select: { id: true, base_id: true },
         });
+        await this.notifications.emettrePlusieurs(
+          scops.map((s) => ({
+            base_id: s.base_id,
+            destinataire_id: s.id,
+            type: TypeNotification.VOL_DIFFUSE,
+            titre: 'Vol à diffuser',
+            message:
+              `Le vol ${p.numero_mission ?? ''} attend l'allocation des quotas ` +
+              `de places et de masse.`,
+            vol_id: p.vol_id,
+          })),
+        );
         break;
       }
 
-      // ── Étape validée : la base voit l'avancement ──
-      case EVENTS.MANIFESTE_STEP_VALIDATED: {
-        if (!payload.base_id) break;
-        const etape = this.libelle(payload.etape);
-        const suivante = this.libelle(payload.etape_suivante);
-        await this.notifications.emettre({
-          base_id: payload.base_id,
-          type: 'ETAPE_VALIDEE',
-          titre: `Validation ${etape ?? ''}`.trim(),
-          message: suivante
-            ? `${etape} a validé. En attente de ${suivante}.`
-            : `${etape} a validé le manifeste.`,
-          manifeste_id: payload.manifeste_id,
-          vol_id: payload.vol_id,
-          etape: payload.etape,
-        });
-        break;
-      }
-
-      // ── Rejet : notifier TOUS les acteurs déjà passés + le suivant ──
-      // "Le suivant" après un rejet, c'est le chef d'escale qui doit corriger.
-      case EVENTS.MANIFESTE_STEP_REJECTED: {
-        if (!payload.base_id || !payload.manifeste_id) break;
-        const etape = this.libelle(payload.etape);
-        const message = payload.motif
-          ? `Manifeste rejeté à l'étape ${etape} : ${payload.motif}`
-          : `Manifeste rejeté à l'étape ${etape}.`;
-
-        // Acteurs déjà passés : les validateurs des étapes approuvées.
-        const acteurs = await this.acteursPasses(payload.manifeste_id);
-        if (acteurs.length) {
-          await this.notifications.emettrePlusieurs(
-            acteurs.map((uid) => ({
-              base_id: payload.base_id!,
-              destinataire_id: uid,
-              type: 'ETAPE_REJETEE' as const,
-              titre: 'Manifeste rejeté',
-              message,
-              manifeste_id: payload.manifeste_id,
-              vol_id: payload.vol_id,
-              etape: payload.etape,
-            })),
-          );
-        } else {
-          // Aucun acteur identifié : au moins informer la base.
+      // ── Diffusion : chaque RMIA touchée reçoit sa liste à constituer ──
+      case VOL_EVENTS.VOL_DIFFUSE: {
+        for (const l of p.listes ?? []) {
           await this.notifications.emettre({
-            base_id: payload.base_id,
-            type: 'ETAPE_REJETEE',
-            titre: 'Manifeste rejeté',
-            message,
-            manifeste_id: payload.manifeste_id,
-            vol_id: payload.vol_id,
-            etape: payload.etape,
+            base_id: l.base_id,
+            rmia:    l.rmia,
+            type:    TypeNotification.LISTE_A_TRAITER,
+            titre:   'Liste à constituer',
+            message:
+              `Vol ${p.numero_mission ?? ''} — quotas alloués pour l'escale ${l.ordre}. ` +
+              `Le secrétaire de l'Adjoint Air peut constituer la liste hiérarchisée.`,
+            vol_id:   p.vol_id,
+            liste_id: l.liste_id,
+            etape:    EtapeListe.SEC_ADJ_AIR,
           });
         }
         break;
       }
 
-      // ── Circuit terminé ──
-      case EVENTS.MANIFESTE_COMPLETED: {
-        if (!payload.base_id) break;
+      case VOL_EVENTS.VOL_ANNULE: {
+        if (!p.vol_id) break;
+        // Annulation : on remonte aux listes pour savoir QUI prévenir. Diffuser
+        // à l'aveugle laisserait des régions travailler sur un vol mort.
+        const listes = await this.prisma.listeEmbarquement.findMany({
+          where: { vol_id: p.vol_id },
+          select: { id: true, rmia: true, etape: { select: { base_id: true } } },
+        });
+        await this.notifications.emettrePlusieurs(
+          listes.map((l) => ({
+            base_id: l.etape.base_id,
+            rmia:    l.rmia as Rmia,
+            type:    TypeNotification.ALERTE,
+            titre:   'Vol annulé',
+            message: `Le vol ${p.numero_mission ?? ''} est annulé.` +
+              (p.motif ? ` Motif : ${p.motif}` : ''),
+            vol_id:   p.vol_id,
+            liste_id: l.id,
+          })),
+        );
+        break;
+      }
+
+      // ── Visa apposé : prévenir l'étape suivante ──
+      case LISTE_EVENTS.LISTE_VISEE: {
+        if (!p.liste_id || !p.etape) break;
+        const suivante = p.etape_suivante;
+        if (!suivante) break;
+
+        const liste = await this.chargerListe(p.liste_id);
+        if (!liste) break;
+
+        // Les étapes COMBASE et COMBORD sortent du périmètre RMIA : la
+        // première s'adresse à la base de décollage, la seconde à une personne
+        // nommée. Les diffuser à la région serait au mieux du bruit, au pire
+        // une fuite d'information vers des officiers non concernés.
+        const versBase = suivante === EtapeListe.COMBASE || suivante === EtapeListe.COMBORD;
+
         await this.notifications.emettre({
-          base_id: payload.base_id,
-          type: 'MANIFESTE_COMPLETE',
-          titre: 'Manifeste validé',
-          message: 'Le circuit de validation est terminé : manifeste signé par le commandant de base.',
-          manifeste_id: payload.manifeste_id,
-          vol_id: payload.vol_id,
-          etape: 'COMBASE',
+          base_id: liste.base_id,
+          rmia:    versBase ? null : (liste.rmia as Rmia),
+          destinataire_id:
+            suivante === EtapeListe.COMBORD ? liste.combord_id ?? null : null,
+          type:  TypeNotification.LISTE_A_TRAITER,
+          titre: `À viser — ${LIBELLE_ETAPE_LISTE[suivante]}`,
+          message:
+            `Vol ${liste.numero_mission}, escale ${liste.ordre} : la liste a été visée par ` +
+            `${LIBELLE_ETAPE_LISTE[p.etape]}. Elle attend votre discrimination.`,
+          vol_id:   liste.vol_id,
+          liste_id: p.liste_id,
+          etape:    suivante,
         });
         break;
       }
 
-      // ── Consignes CEMAA appliquées ──
+      // ── Renvoi : prévenir celui qui doit corriger ──
+      case LISTE_EVENTS.LISTE_REJETEE: {
+        if (!p.liste_id || !p.etape_retour) break;
+        const liste = await this.chargerListe(p.liste_id);
+        if (!liste) break;
+
+        await this.notifications.emettre({
+          base_id: liste.base_id,
+          rmia:    liste.rmia as Rmia,
+          type:    TypeNotification.LISTE_REJETEE,
+          titre:   'Liste renvoyée',
+          message:
+            `Vol ${liste.numero_mission}, escale ${liste.ordre} : renvoyée par ` +
+            `${p.etape ? LIBELLE_ETAPE_LISTE[p.etape] : 'une autorité'}. ` +
+            `Motif : ${p.motif ?? 'non précisé'}`,
+          vol_id:   liste.vol_id,
+          liste_id: p.liste_id,
+          etape:    p.etape_retour,
+        });
+        break;
+      }
+
+      // ── Arrêté : manifeste émis, messages partis ──
+      case LISTE_EVENTS.LISTE_ARRETEE: {
+        if (!p.liste_id) break;
+        const liste = await this.chargerListe(p.liste_id);
+        if (!liste) break;
+
+        await this.notifications.emettre({
+          base_id: liste.base_id,
+          rmia:    liste.rmia as Rmia,
+          type:    TypeNotification.LISTE_ARRETEE,
+          titre:   'Liste arrêtée — manifeste émis',
+          message:
+            `Vol ${liste.numero_mission}, escale ${liste.ordre} : ${p.nb_passagers ?? 0} ` +
+            `passager(s) portés au manifeste. Les voyageurs retenus sont en cours ` +
+            `d'information par message.`,
+          vol_id:       liste.vol_id,
+          liste_id:     p.liste_id,
+          manifeste_id: p.manifeste_id,
+        });
+
+        // Le commandant de bord est prévenu nominativement : c'est lui, et
+        // personne d'autre, qui doit maintenant agir.
+        if (liste.combord_id) {
+          await this.notifications.emettre({
+            base_id: liste.base_id,
+            destinataire_id: liste.combord_id,
+            type:  TypeNotification.LISTE_A_TRAITER,
+            titre: 'Manifeste à viser',
+            message:
+              `Vol ${liste.numero_mission}, escale ${liste.ordre} : le manifeste attend ` +
+              `votre discrimination et votre visa.`,
+            vol_id:       liste.vol_id,
+            liste_id:     p.liste_id,
+            manifeste_id: p.manifeste_id,
+            etape:        EtapeListe.COMBORD,
+          });
+        }
+        break;
+      }
+
+      // ── Clôture : document définitif ──
+      case LISTE_EVENTS.LISTE_CLOTUREE: {
+        if (!p.liste_id) break;
+        const liste = await this.chargerListe(p.liste_id);
+        if (!liste) break;
+
+        await this.notifications.emettre({
+          base_id: liste.base_id,
+          rmia:    liste.rmia as Rmia,
+          type:    TypeNotification.MANIFESTE_DEFINITIF,
+          titre:   'Manifeste définitif',
+          message:
+            `Vol ${liste.numero_mission}, escale ${liste.ordre} : visa du commandant ` +
+            `de bord apposé. Le manifeste est opposable et archivé.`,
+          vol_id:       liste.vol_id,
+          liste_id:     p.liste_id,
+          manifeste_id: p.manifeste_id,
+        });
+        break;
+      }
+
+      // ── Consignes d'autorité centrale ──
       case CEMAA_EVENTS.CONSIGNE_CREATED:
       case CEMAA_EVENTS.CONSIGNE_UPDATED: {
-        for (const m of payload.manifestes ?? []) {
-          await this.notifications.emettre({
-            base_id: m.base_id,
-            type: 'CONSIGNE_CEMAA',
-            titre: 'Consignes CEMAA',
-            message: 'Des consignes CEMAA ont été appliquées à un manifeste de votre base.',
-            manifeste_id: m.id,
-            vol_id: payload.vol_id,
-          });
-        }
+        if (!p.vol_id) break;
+        const listes = await this.prisma.listeEmbarquement.findMany({
+          where: { vol_id: p.vol_id },
+          select: { id: true, rmia: true, etape: { select: { base_id: true } } },
+        });
+        await this.notifications.emettrePlusieurs(
+          listes.map((l) => ({
+            base_id: l.etape.base_id,
+            rmia:    l.rmia as Rmia,
+            type:    TypeNotification.CONSIGNE_AUTORITE,
+            titre:   "Consigne d'autorité centrale",
+            message:
+              `Une consigne a été émise sur ce vol. Le visa du commandant de bord ` +
+              `restera bloqué tant que son exécution n'aura pas été confirmée.`,
+            vol_id:   p.vol_id,
+            liste_id: l.id,
+          })),
+        );
         break;
       }
 
-      // ── Alertes ──
+      // ── Alertes transverses ──
+      //
+      // Diffusées à TOUS les clients connectés, sans persistance : une
+      // marchandise dangereuse ou une évacuation sanitaire concerne quiconque
+      // se trouve sur le trajet. Les persister par base produirait des centaines
+      // de lignes pour un évènement unique.
       case ALERT_EVENTS.EVASAN:
-        await this.alerte(payload, 'Passager EVASAN à bord');
-        break;
       case ALERT_EVENTS.VIP:
-        await this.alerte(payload, 'Passager VIP à bord');
+      case ALERT_EVENTS.DANGEROUS_GOODS: {
+        this.gateway.broadcastToAll('alerte', { type: routingKey, ...p });
         break;
-      case ALERT_EVENTS.DANGEROUS_GOODS:
-        await this.alerte(payload, 'Marchandise dangereuse déclarée');
-        break;
+      }
 
       default:
-        this.logger.debug(`Routing key non gérée : ${routingKey}`);
+        // Évènement non traité : silence volontaire. La file est liée à « # »,
+        // donc tout passe ici ; journaliser chaque message inconnu noierait les
+        // journaux sous le trafic normal.
+        break;
     }
   }
 
-  private async alerte(payload: BaseScopedEvent, message: string): Promise<void> {
-    if (!payload.base_id) return;
-    await this.notifications.emettre({
-      base_id: payload.base_id,
-      type: 'ALERTE',
-      titre: 'Alerte manifeste',
-      message,
-      manifeste_id: payload.manifeste_id,
-      vol_id: payload.vol_id,
+  /** Contexte minimal d'une liste, pour composer un message lisible. */
+  private async chargerListe(liste_id: string): Promise<{
+    vol_id: string; numero_mission: string; ordre: number;
+    base_id: string; rmia: string; combord_id: string | null;
+  } | null> {
+    const l = await this.prisma.listeEmbarquement.findUnique({
+      where: { id: liste_id },
+      select: {
+        vol_id: true, rmia: true,
+        etape: { select: { ordre: true, base_id: true } },
+        vol:   { select: { numero_mission: true, combord_id: true } },
+      },
     });
+    if (!l) return null;
+    return {
+      vol_id: l.vol_id,
+      numero_mission: l.vol.numero_mission,
+      ordre: l.etape.ordre,
+      base_id: l.etape.base_id,
+      rmia: String(l.rmia),
+      combord_id: l.vol.combord_id,
+    };
   }
 
-  /** Libellé lisible d'une étape, tolérant aux valeurs inconnues/nulles. */
-  private libelle(etape?: string | null): string | undefined {
-    if (!etape) return undefined;
-    return LIBELLE_ETAPE[etape as EtapeValidation] ?? etape;
-  }
-
-  /**
-   * Identifiants des validateurs ayant APPROUVÉ une étape de ce manifeste :
-   * ce sont "les acteurs déjà passés" à notifier lors d'un rejet.
-   */
-  private async acteursPasses(manifeste_id: string): Promise<string[]> {
-    const etapes = await this.prisma.validationEtape.findMany({
-      where: { manifeste_id, statut: 'APPROUVE', validateur_id: { not: null } },
-      select: { validateur_id: true },
-    });
-    // Dédoublonnage (un même agent peut théoriquement avoir signé 2 étapes).
-    return [...new Set(etapes.map((e) => e.validateur_id).filter((x): x is string => !!x))];
+  /** Libellé d'une RMIA, pour les messages adressés à une région entière. */
+  private libelleRmia(rmia: Rmia | undefined): string {
+    return rmia ? LIBELLE_RMIA[rmia] ?? String(rmia) : '';
   }
 }

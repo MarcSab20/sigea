@@ -1,615 +1,443 @@
 // apps/frontend/src/app/vols/VolsPage.tsx
-import React, { useState, useEffect } from 'react';
-import { useNavigate, Routes, Route } from 'react-router-dom';
-import { volApi, Vol } from '@/services/manifeste.service';
-import { T } from '@/lib/theme';
+
+import React, { useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import type { AxiosError } from 'axios';
+import {
+  Plane, Plus, Trash2, ChevronUp, ChevronDown, Loader2, MapPin, X,
+} from 'lucide-react';
+import { RoleUtilisateur, TypeMission, ROLES_CREATION_VOL } from '@sigea/shared-types';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth.store';
+import { referentielService, type BaseDB, type AeronefDB } from '@/services/referentiel.service';
+import { volService, type Vol } from '@/services/vol.service';
 
-const BASES_FAC = [
-  { id: 'BA101', code: 'BA 101', nom: 'Yaoundé',    region: 'Centre' },
-  { id: 'BA201', code: 'BA 201', nom: 'Douala',     region: 'Littoral' },
-  { id: 'BA301', code: 'BA 301', nom: 'Garoua',     region: 'Nord' },
-  { id: 'BA401', code: 'BA 401', nom: 'Maroua',     region: 'Extrême-Nord' },
-  { id: 'BA302', code: 'BA 302', nom: 'Ngaoundéré', region: 'Adamaoua' },
-  { id: 'BA501', code: 'BA 501', nom: 'Bamenda',  region: 'Nord-Ouest' },
-  { id: 'BA102', code: 'BA 102', nom: 'Bertoua',    region: 'Est' },
+const TYPES_MISSION: { value: TypeMission; label: string }[] = [
+  { value: TypeMission.PROJECTION,  label: 'Projection' },
+  { value: TypeMission.PARA,        label: 'Parachutage' },
+  { value: TypeMission.LIAISON,     label: 'Liaison' },
+  { value: TypeMission.LOGISTIQUE,  label: 'Logistique' },
+  { value: TypeMission.EVASAN,      label: 'EVASAN — évacuation sanitaire' },
+  { value: TypeMission.VIP,         label: 'VIP' },
+  { value: TypeMission.OP_SENSIBLE, label: 'Opération sensible' },
 ];
 
-const AERONEFS_FAC = [
-  { immat: 'TJ-AAF', type: 'C-130 Hercule', places: 92,  cargo: 19000 },
-  { immat: 'TJ-ABB', type: 'Agusta',        places: 12,  cargo: 1500  },
-  { immat: 'TJ-ACC', type: 'CESSNA 2B',     places: 8,   cargo: 800   },
-  { immat: 'TJ-AZZ', type: 'Z9',            places: 10,  cargo: 1200  },
-  { immat: 'TJ-AMI', type: 'MI-17',         places: 24,  cargo: 4000  },
-];
-
-const GRADES_MILITAIRES = [
-  'Général de Corps d\'Armée Aérienne','Général de Division Aérienne',
-  'Général de Brigade Aérienne','Colonel','Lieutenant-Colonel',
-  'Commandant','Capitaine','Lieutenant','Sous-Lieutenant',
-  'Adjudant-Chef','Adjudant','Sergent-Chef','Sergent',
-];
-
-const TYPE_MISSIONS = [
-  { value: 'PROJECTION',  label: 'Projection' },
-  { value: 'PARA',        label: 'Parachutage' },
-  { value: 'LIAISON',     label: 'Liaison' },
-  { value: 'LOGISTIQUE',  label: 'Logistique' },
-  { value: 'EVASAN',      label: 'EVASAN — Évacuation sanitaire' },
-  { value: 'VIP',         label: 'VIP' },
-  { value: 'OP_SENSIBLE', label: 'Opération sensible' },
-];
-
-interface EscaleCapacite {
-  base_id: string;
-  capacite_places: number;
-  capacite_cargo_kg: number;
+interface Personnel {
+  id: string; nom: string; prenom: string; grade: string;
+  role: string; base_id: string; actif: boolean;
 }
 
-function Card({ children, style={} }: { children: React.ReactNode; style?: React.CSSProperties }): React.ReactElement {
-  return <div style={{ background: T.bgCard, border: `1px solid ${T.border}`,
-    borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.06)', ...style }}>{children}</div>;
+function messageErreur(e: unknown): string {
+  const err = e as AxiosError<{ message?: string | string[] }>;
+  const m = err.response?.data?.message;
+  return Array.isArray(m) ? m.join(' — ') : (m ?? err.message ?? 'Erreur inattendue');
 }
 
-function Field({ label, value, onChange, type='text', required, options, placeholder, disabled, hint }: {
-  label: string; value: string; onChange: (v: string) => void;
-  type?: string; required?: boolean; disabled?: boolean;
-  options?: { value: string; label: string }[];
-  placeholder?: string; hint?: string;
-}): React.ReactElement {
-  const [focused, setFocused] = useState(false);
-  const base: React.CSSProperties = {
-    width: '100%', padding: '9px 12px',
-    background: disabled ? T.bgAlt : (focused ? T.bgCard : T.bgInput),
-    border: `1px solid ${focused ? T.green : T.border}`, borderRadius: 6,
-    color: disabled ? T.textDim : T.text, fontSize: 13, outline: 'none',
-    boxSizing: 'border-box', transition: 'border-color 0.2s', fontFamily: T.body,
-    boxShadow: focused ? `0 0 0 3px ${T.green}20` : 'none',
-    cursor: disabled ? 'not-allowed' : 'auto',
-  };
-  return (
-    <div style={{ marginBottom: 14 }}>
-      <label style={{ display: 'block', fontSize: 11, fontWeight: 600,
-        color: T.textSub, marginBottom: 5 }}>
-        {label}{required && <span style={{ color: T.red, marginLeft: 3 }}>*</span>}
-      </label>
-      {options ? (
-        <select value={value} onChange={e => onChange(e.target.value)} disabled={disabled}
-          onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
-          style={{ ...base, appearance: 'none',
-            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%234a4540' stroke-width='1.5' fill='none'/%3E%3C/svg%3E")`,
-            backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center', paddingRight: 32 }}>
-          <option value="">— Sélectionner —</option>
-          {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
-      ) : (
-        <input type={type} value={value} onChange={e => onChange(e.target.value)}
-          placeholder={placeholder} disabled={disabled}
-          onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} style={base} />
-      )}
-      {hint && <div style={{ fontSize: 11, color: T.textDim, marginTop: 3 }}>{hint}</div>}
-    </div>
-  );
-}
-
-function SectionTitle({ title }: { title: string }): React.ReactElement {
-  return (
-    <div style={{ fontSize: 11, fontWeight: 700, color: T.textSub,
-      textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 14,
-      marginTop: 6, paddingBottom: 8, borderBottom: `1px solid ${T.border}`,
-      display: 'flex', alignItems: 'center', gap: 8 }}>
-      <div style={{ width: 3, height: 14, background: T.green, borderRadius: 2 }} />
-      {title}
-    </div>
-  );
-}
-
-// ─── Liste vols ───────────────────────────────────────────────────────────────
-function VolsListPage(): React.ReactElement {
-  const navigate = useNavigate();
-  const [vols, setVols] = useState<Vol[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    volApi.list().then(setVols).catch(() => toast.error('Erreur chargement vols')).finally(() => setLoading(false));
-  }, []);
-
-  const getBase = (id: string): string => {
-    const b = BASES_FAC.find(x => x.id === id || x.code.replace(' ','') === id.replace(' ',''));
-    return b?.code ?? id?.slice(0, 6) ?? '—';
-  };
-
-  return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24 }}>
-        <div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: T.text, fontFamily: T.display }}>
-            Vols Planifiés
-          </h1>
-          <p style={{ fontSize: 13, color: T.textDim, marginTop: 4 }}>
-            Missions aériennes des Forces Aériennes du Cameroun
-          </p>
-        </div>
-        <button onClick={() => navigate('/vols/nouveau')} style={{
-          padding: '10px 20px', background: T.green, border: 'none',
-          borderRadius: 6, color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
-          + Nouveau Vol
-        </button>
-      </div>
-      <Card>
-        {loading ? (
-          <div style={{ padding: 48, textAlign: 'center', color: T.textDim }}>Chargement…</div>
-        ) : vols.length === 0 ? (
-          <div style={{ padding: 60, textAlign: 'center' }}>
-            <div style={{ fontSize: 40, marginBottom: 12 }}>✈</div>
-            <div style={{ fontSize: 14, color: T.textDim, marginBottom: 20 }}>Aucun vol planifié</div>
-            <button onClick={() => navigate('/vols/nouveau')} style={{
-              padding: '10px 24px', background: T.green, border: 'none',
-              borderRadius: 6, color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
-              Planifier un vol
-            </button>
-          </div>
-        ) : (
-          <div>
-            <div style={{ display: 'grid',
-              gridTemplateColumns: '160px 1fr 180px 160px 60px 80px 100px',
-              padding: '10px 20px', fontSize: 10, fontWeight: 600, color: T.textDim,
-              textTransform: 'uppercase', letterSpacing: '0.08em',
-              borderBottom: `1px solid ${T.border}` }}>
-              <span>N° Mission</span><span>Trajet · COMBORD</span><span>Date / Heure</span>
-              <span>Type</span><span>PAX</span><span>Statut</span>
-              <span style={{ textAlign: 'right' }}>Actions</span>
-            </div>
-            {vols.map(v => {
-              const vAny = v as any;
-              return (
-                <div key={v.id} className="row-hover" style={{
-                  display: 'grid',
-                  gridTemplateColumns: '160px 1fr 180px 160px 60px 80px 100px',
-                  padding: '13px 20px', borderBottom: `1px solid ${T.border}`,
-                  alignItems: 'center', transition: 'background 0.1s' }}>
-                  <span style={{ fontSize: 11, fontFamily: T.mono, fontWeight: 600, color: T.green }}>
-                    {v.numero_mission}
-                  </span>
-                  <div>
-                    <div style={{ fontSize: 12, fontWeight: 500, color: T.text }}>
-                      {v.immatriculation} · {getBase(v.base_depart_id)} → {getBase(v.base_arrivee_id)}
-                    </div>
-                    {vAny.combord_nom && (
-                      <div style={{ fontSize: 10, color: T.textDim, marginTop: 2 }}>
-                        COMBORD : {vAny.combord_grade} {vAny.combord_nom} {vAny.combord_prenom}
-                      </div>
-                    )}
-                  </div>
-                  <span style={{ fontSize: 12, color: T.textSub }}>
-                    {new Date(v.date_heure).toLocaleString('fr-FR', {
-                      day: '2-digit', month: '2-digit', year: '2-digit',
-                      hour: '2-digit', minute: '2-digit'
-                    })}
-                  </span>
-                  <span style={{ fontSize: 11, color: T.textSub, background: T.bgAlt,
-                    borderRadius: 4, padding: '2px 8px' }}>
-                    {TYPE_MISSIONS.find(t => t.value === v.type_mission)?.label ?? v.type_mission}
-                  </span>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: T.text }}>
-                    {v.capacite_places}
-                  </span>
-                  <span style={{ fontSize: 10, fontWeight: 600,
-                    color: v.statut === 'PLANIFIE' ? T.blue : T.green,
-                    background: v.statut === 'PLANIFIE' ? T.blueBg : T.greenBg,
-                    borderRadius: 4, padding: '2px 6px' }}>
-                    {v.statut}
-                  </span>
-                  <div style={{ display: 'flex', gap: 5, justifyContent: 'flex-end' }}>
-                    <button onClick={() => navigate(`/manifestes/nouveau?vol=${v.id}`)} style={{
-                      padding: '4px 8px', background: T.greenBg,
-                      border: `1px solid ${T.greenBorder}`, borderRadius: 4,
-                      color: T.green, fontSize: 10, cursor: 'pointer', fontWeight: 500 }}>
-                      Manifeste
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </Card>
-    </div>
-  );
-}
-
-// ─── Nouveau vol ──────────────────────────────────────────────────────────────
-function NouveauVolPage(): React.ReactElement {
-  const navigate = useNavigate();
-  const [submitting, setSubmitting] = useState(false);
-  const [escales, setEscales] = useState<EscaleCapacite[]>([]);
-
-  const [form, setForm] = useState({
-    numero_mission: '', immatriculation: '', date_heure: '',
-    base_arrivee_id: '', type_mission: '',
-    capacite_places: '', capacite_cargo_kg: '',
-    combord_grade: '', combord_nom: '', combord_prenom: '',
-  });
-
-  const set = (k: string) => (v: string): void => setForm(f => ({ ...f, [k]: v }));
-
-  // Base de départ = affectation du planificateur. Le backend l'impose ;
-  // le formulaire ne fait que la refléter.
-  const user = useAuthStore(st => st.user);
-  const baseDepartId = user?.base_id ?? '';
-  const baseDepart = BASES_FAC.find(b => b.id === baseDepartId);
-
-  /**
-   * Changement d'aéronef.
-   *
-   * Les capacités ne sont plus préremplies ni verrouillées : le planificateur
-   * les saisit. La fiche du référentiel donne une capacité de CATALOGUE, qui
-   * n'est pas l'emport réel d'une mission — configuration cabine, carburant
-   * emporté, terrain d'escale et température jouent tous dessus. Préremplir
-   * puis verrouiller donnait une apparence de rigueur en imposant une valeur
-   * souvent fausse. Elle reste affichée à titre indicatif.
-   */
-  const handleAeronefChange = (immat: string): void => {
-    setForm(f => ({ ...f, immatriculation: immat }));
-    setEscales([]);
-  };
-
-  const aeronef = AERONEFS_FAC.find(a => a.immat === form.immatriculation);
-
-  const addEscale = (): void => {
-    // Capacités d'escale à zéro : à saisir, comme celles du vol.
-    setEscales(prev => [...prev, { base_id: '', capacite_places: 0, capacite_cargo_kg: 0 }]);
-  };
-
-  const removeEscale = (i: number): void =>
-    setEscales(prev => prev.filter((_, idx) => idx !== i));
-
-  const updateEscale = (i: number, field: keyof EscaleCapacite, value: string | number): void =>
-    setEscales(prev => prev.map((e, idx) => idx === i ? { ...e, [field]: value } : e));
-
-  // Bases disponibles pour escales (pas départ ni arrivée)
-  const basesEscales = BASES_FAC.filter(b =>
-    b.id !== baseDepartId && b.id !== form.base_arrivee_id &&
-    !escales.find(e => e.base_id === b.id)
-  );
-
-  const isValid = form.numero_mission && form.immatriculation && form.date_heure &&
-    baseDepartId && form.base_arrivee_id && form.type_mission &&
-    form.combord_grade && form.combord_nom && form.combord_prenom &&
-    escales.every(e => e.base_id);
-
-  const handleSubmit = async (): Promise<void> => {
-    if (!isValid) { toast.error('Remplissez tous les champs obligatoires'); return; }
-    if (baseDepartId === form.base_arrivee_id) {
-      toast.error('La base d\'arrivée ne peut pas être votre base de départ'); return;
-    }
-    setSubmitting(true);
-    try {
-      await api.post('/vols', {
-        ...form,
-        capacite_places:   Number(form.capacite_places),
-        capacite_cargo_kg: Number(form.capacite_cargo_kg),
-        escales: escales.length > 0 ? escales : undefined,
-      });
-      toast.success('Vol planifié avec succès');
-      navigate('/vols');
-    } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { message?: string | string[] } } })?.response?.data?.message;
-      toast.error(Array.isArray(msg) ? msg[0] : (msg ?? 'Erreur de création'));
-    } finally { setSubmitting(false); }
-  };
-
-  return (
-    <div style={{ maxWidth: 920, margin: '0 auto' }}>
-      <div style={{ marginBottom: 24 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, color: T.text, fontFamily: T.display }}>
-          Planifier un Vol
-        </h1>
-        <p style={{ fontSize: 13, color: T.textDim, marginTop: 4 }}>
-          Création d'une nouvelle mission aérienne
-        </p>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 16 }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-
-          {/* Identification */}
-          <Card style={{ padding: '22px 26px' }}>
-            <SectionTitle title="Identification de la mission" />
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 20px' }}>
-              <Field label="Numéro de mission" value={form.numero_mission}
-                onChange={set('numero_mission')} required placeholder="MIS-2026-XXXX" />
-              <Field label="Type de mission" value={form.type_mission}
-                onChange={set('type_mission')} required options={TYPE_MISSIONS} />
-            </div>
-            <Field label="Date et heure de départ" value={form.date_heure}
-              onChange={set('date_heure')} type="datetime-local" required />
-          </Card>
-
-          {/* Commandant de bord */}
-          <Card style={{ padding: '22px 26px',
-            border: `1px solid ${T.greenBorder}`, background: T.greenBg }}>
-            <SectionTitle title="Commandant de Bord (COMBORD)" />
-            <div style={{ padding: '8px 12px', background: T.bgCard,
-              border: `1px solid ${T.border}`, borderRadius: 6, marginBottom: 14,
-              fontSize: 11, color: T.textSub, lineHeight: 1.6 }}>
-              Le COMBORD valide en dernier après toute la chaîne (Chef Escale → COMESO →
-              COMGMO → COMBASE). Sa signature finale rend le manifeste opérationnel.
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0 16px' }}>
-              <Field label="Grade" value={form.combord_grade} onChange={set('combord_grade')}
-                required options={GRADES_MILITAIRES.map(g => ({ value: g, label: g }))} />
-              <Field label="Nom" value={form.combord_nom} onChange={set('combord_nom')}
-                required placeholder="NOM" />
-              <Field label="Prénom(s)" value={form.combord_prenom} onChange={set('combord_prenom')}
-                required placeholder="Prénoms" />
-            </div>
-          </Card>
-
-          {/* Trajet */}
-          <Card style={{ padding: '22px 26px' }}>
-            <SectionTitle title="Trajet" />
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 40px 1fr', gap: '0 12px', alignItems: 'end' }}>
-              {/* Base de départ : imposée par l'affectation du planificateur.
-                  Affichée en lecture seule plutôt que masquée — le trajet doit
-                  rester lisible d'un coup d'œil. Le backend l'impose de toute
-                  façon et ignore ce que le formulaire enverrait. */}
-              <div style={{ marginBottom: 14 }}>
-                <label style={{ display: 'block', fontSize: 11, fontWeight: 600,
-                  color: T.textSub, marginBottom: 5 }}>Base de départ</label>
-                <div style={{ padding: '9px 12px', background: T.bgAlt,
-                  border: `1px solid ${T.border}`, borderRadius: 6, fontSize: 13,
-                  color: T.text, display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontFamily: T.mono, fontWeight: 600 }}>{baseDepart?.code ?? '—'}</span>
-                  <span style={{ color: T.textDim, fontSize: 12 }}>{baseDepart?.nom ?? 'Base d\'affectation inconnue'}</span>
-                  <span style={{ marginLeft: 'auto', fontSize: 10, color: T.textDim,
-                    textTransform: 'uppercase', letterSpacing: '0.06em' }}>Votre base</span>
-                </div>
-              </div>
-              <div style={{ marginBottom: 14, textAlign: 'center', fontSize: 20,
-                color: T.textDim, paddingTop: 20 }}>→</div>
-              <Field label="Base d'arrivée" value={form.base_arrivee_id}
-                onChange={set('base_arrivee_id')} required
-                options={BASES_FAC.filter(b => b.id !== baseDepartId)
-                  .map(b => ({ value: b.id, label: `${b.code} — ${b.nom}` }))} />
-            </div>
-
-            {/* Escales intermédiaires */}
-            <div style={{ marginTop: 4 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between',
-                alignItems: 'center', marginBottom: 10 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: T.textSub }}>
-                  Escales intermédiaires ({escales.length})
-                </div>
-                <button onClick={addEscale} disabled={basesEscales.length === 0}
-                  style={{ padding: '5px 12px', background: T.blueBg,
-                    border: `1px solid ${T.blueBorder}`, borderRadius: 5,
-                    color: T.blue, fontSize: 11, cursor: 'pointer', fontWeight: 500 }}>
-                  + Ajouter une escale
-                </button>
-              </div>
-
-              {escales.length === 0 ? (
-                <div style={{ padding: '10px 14px', background: T.bgAlt,
-                  borderRadius: 5, fontSize: 11, color: T.textDim, textAlign: 'center' }}>
-                  Vol direct — aucune escale intermédiaire
-                </div>
-              ) : escales.map((e, i) => (
-                <div key={i} style={{ padding: '12px 14px', background: T.bgAlt,
-                  border: `1px solid ${T.border}`, borderRadius: 6,
-                  marginBottom: 8, position: 'relative' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between',
-                    alignItems: 'center', marginBottom: 10 }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: T.textSub }}>
-                      Escale {i + 1}
-                    </div>
-                    <button onClick={() => removeEscale(i)} style={{
-                      background: T.redBg, border: `1px solid ${T.redBorder}`,
-                      borderRadius: 4, color: T.red, fontSize: 10, cursor: 'pointer',
-                      padding: '2px 8px' }}>Supprimer</button>
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0 12px' }}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: 11, fontWeight: 600,
-                        color: T.textSub, marginBottom: 5 }}>
-                        Base <span style={{ color: T.red }}>*</span>
-                      </label>
-                      <select value={e.base_id}
-                        onChange={ev => updateEscale(i, 'base_id', ev.target.value)}
-                        style={{ width: '100%', padding: '8px 10px', background: T.bgCard,
-                          border: `1px solid ${T.border}`, borderRadius: 5,
-                          color: T.text, fontSize: 12, outline: 'none' }}>
-                        <option value="">— Sélectionner —</option>
-                        {[...basesEscales, ...(e.base_id ? [BASES_FAC.find(b => b.id === e.base_id)!] : [])].filter(Boolean)
-                          .map(b => <option key={b.id} value={b.id}>{b.code} — {b.nom}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: 11, fontWeight: 600,
-                        color: T.textSub, marginBottom: 5 }}>
-                        Capacité PAX <span style={{ color: T.red }}>*</span>
-                      </label>
-                      <input type="number" value={e.capacite_places}
-                        onChange={ev => updateEscale(i, 'capacite_places', Number(ev.target.value))}
-                        style={{ width: '100%', padding: '8px 10px', background: T.bgCard,
-                          border: `1px solid ${T.border}`, borderRadius: 5,
-                          color: T.text, fontSize: 12, outline: 'none', boxSizing: 'border-box' }} />
-                      <div style={{ fontSize: 10, color: T.textDim, marginTop: 2 }}>
-                        Max : {form.capacite_places || '?'} places
-                      </div>
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: 11, fontWeight: 600,
-                        color: T.textSub, marginBottom: 5 }}>
-                        Capacité cargo (kg) <span style={{ color: T.red }}>*</span>
-                      </label>
-                      <input type="number" value={e.capacite_cargo_kg}
-                        onChange={ev => updateEscale(i, 'capacite_cargo_kg', Number(ev.target.value))}
-                        style={{ width: '100%', padding: '8px 10px', background: T.bgCard,
-                          border: `1px solid ${T.border}`, borderRadius: 5,
-                          color: T.text, fontSize: 12, outline: 'none', boxSizing: 'border-box' }} />
-                      <div style={{ fontSize: 10, color: T.textDim, marginTop: 2 }}>
-                        Max : {form.capacite_cargo_kg || '?'} kg
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Card>
-
-          {/* Aéronef + capacités */}
-          <Card style={{ padding: '22px 26px' }}>
-            <SectionTitle title="Aéronef et capacités" />
-            <Field label="Aéronef" value={form.immatriculation}
-              onChange={handleAeronefChange} required
-              options={AERONEFS_FAC.map(a => ({
-                value: a.immat,
-                label: `${a.immat} — ${a.type} (${a.places} PAX / ${a.cargo.toLocaleString()} kg)`
-              }))} />
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 20px' }}>
-              <Field label="Capacité PAX totale" value={form.capacite_places}
-                onChange={set('capacite_places')} type="number" required
-                hint={aeronef ? `Catalogue ${aeronef.type} : ${aeronef.places} places` : ''} />
-              <Field label="Capacité cargo totale (kg)" value={form.capacite_cargo_kg}
-                onChange={set('capacite_cargo_kg')} type="number" required
-                hint={aeronef ? `Catalogue ${aeronef.type} : ${aeronef.cargo.toLocaleString()} kg` : ''} />
-            </div>
-          </Card>
-
-          {/* Alertes */}
-          {form.type_mission === 'OP_SENSIBLE' && (
-            <div style={{ padding: '12px 16px', background: T.amberBg,
-              border: `1px solid ${T.amberBorder}`, borderRadius: 6,
-              fontSize: 12, color: T.amber, display: 'flex', gap: 8 }}>
-              ⚠ Mission sensible — circuit CEMAA activé automatiquement
-            </div>
-          )}
-          {form.type_mission === 'EVASAN' && (
-            <div style={{ padding: '12px 16px', background: T.redBg,
-              border: `1px solid ${T.redBorder}`, borderRadius: 6,
-              fontSize: 12, color: T.red, display: 'flex', gap: 8 }}>
-              ✚ EVASAN — circuit accéléré, notification médecin de base
-            </div>
-          )}
-
-          {/* Actions */}
-          <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
-            <button onClick={() => navigate('/vols')} style={{
-              padding: '10px 24px', background: T.bgAlt,
-              border: `1px solid ${T.border}`, borderRadius: 6,
-              color: T.textSub, fontSize: 13, cursor: 'pointer' }}>Annuler</button>
-            <button onClick={handleSubmit} disabled={!isValid || submitting} style={{
-              padding: '10px 28px',
-              background: (!isValid || submitting) ? T.textMute : T.green,
-              border: 'none', borderRadius: 6, color: '#fff', fontSize: 13,
-              fontWeight: 600, cursor: (!isValid || submitting) ? 'not-allowed' : 'pointer',
-              opacity: (!isValid || submitting) ? 0.6 : 1 }}>
-              {submitting ? 'Planification…' : 'Planifier ce vol →'}
-            </button>
-          </div>
-        </div>
-
-        {/* Panneau de synthèse */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {/* Fiche aéronef */}
-          {aeronef && (
-            <Card style={{ padding: '16px 18px', background: T.greenBg,
-              border: `1px solid ${T.greenBorder}` }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: T.green,
-                marginBottom: 8 }}>✈ {aeronef.immat}</div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: T.text, marginBottom: 10 }}>
-                {aeronef.type}
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
-                <span style={{ fontSize: 11, color: T.textDim }}>PAX max</span>
-                <span style={{ fontSize: 12, fontWeight: 600, color: T.green }}>{aeronef.places}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ fontSize: 11, color: T.textDim }}>Cargo max</span>
-                <span style={{ fontSize: 12, fontWeight: 600, color: T.green }}>
-                  {aeronef.cargo.toLocaleString()} kg
-                </span>
-              </div>
-            </Card>
-          )}
-
-          {/* Synthèse trajet */}
-          {(baseDepartId || form.base_arrivee_id || escales.length > 0) && (
-            <Card style={{ padding: '16px 18px' }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: T.textSub,
-                textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 12 }}>
-                Itinéraire
-              </div>
-              {[
-                baseDepartId && BASES_FAC.find(b => b.id === baseDepartId),
-                ...escales.map(e => BASES_FAC.find(b => b.id === e.base_id)),
-                form.base_arrivee_id && BASES_FAC.find(b => b.id === form.base_arrivee_id),
-              ].filter(Boolean).map((b, i, arr) => (
-                <React.Fragment key={i}>
-                  <div style={{ padding: '6px 10px', background: i === 0 ? T.greenBg : i === arr.length-1 ? T.blueBg : T.amberBg,
-                    border: `1px solid ${i === 0 ? T.greenBorder : i === arr.length-1 ? T.blueBorder : T.amberBorder}`,
-                    borderRadius: 5, fontSize: 11, fontWeight: 600,
-                    color: i === 0 ? T.green : i === arr.length-1 ? T.blue : T.amber }}>
-                    {i === 0 ? '🛫' : i === arr.length-1 ? '🛬' : '⏸'} {(b as any).code} — {(b as any).nom}
-                    {escales[i-1] && (
-                      <div style={{ fontSize: 10, color: T.textDim, fontWeight: 400, marginTop: 2 }}>
-                        {escales[i-1].capacite_places} PAX · {escales[i-1].capacite_cargo_kg} kg
-                      </div>
-                    )}
-                  </div>
-                  {i < arr.length - 1 && (
-                    <div style={{ textAlign: 'center', fontSize: 14, color: T.textDim,
-                      margin: '3px 0' }}>↓</div>
-                  )}
-                </React.Fragment>
-              ))}
-            </Card>
-          )}
-
-          {/* COMBORD synthèse */}
-          {(form.combord_grade || form.combord_nom) && (
-            <Card style={{ padding: '14px 16px', background: T.greenBg,
-              border: `1px solid ${T.greenBorder}` }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: T.green,
-                marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                COMBORD
-              </div>
-              <div style={{ fontSize: 12, color: T.text }}>
-                {form.combord_grade && <div style={{ fontSize: 10, color: T.textDim }}>{form.combord_grade}</div>}
-                <div style={{ fontWeight: 600 }}>
-                  {form.combord_nom} {form.combord_prenom}
-                </div>
-              </div>
-            </Card>
-          )}
-
-          {/* Guide */}
-          <Card style={{ padding: '14px 16px', background: T.bgAlt }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: T.textSub,
-              marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-              ℹ Guide
-            </div>
-            <div style={{ fontSize: 11, color: T.textDim, lineHeight: 1.7 }}>
-              • Capacités auto-remplies par aéronef<br />
-              • Escales : définissez les capacités allouées à chaque base intermédiaire<br />
-              • Le COMBORD signe en dernier — sa signature rend le manifeste opérationnel<br />
-              • Missions VIP/EVASAN/Sensible activent des circuits spéciaux
-            </div>
-          </Card>
-        </div>
-      </div>
-    </div>
-  );
-}
+const LIBELLE_STATUT: Record<string, { texte: string; classe: string }> = {
+  PLANIFIE: { texte: 'Planifié — en attente du SCOPS', classe: 'bg-amber-100 text-amber-800' },
+  DIFFUSE:  { texte: 'Diffusé', classe: 'bg-blue-100 text-blue-800' },
+  EN_COURS: { texte: 'En cours', classe: 'bg-emerald-100 text-emerald-800' },
+  CLOTURE:  { texte: 'Clôturé', classe: 'bg-slate-100 text-slate-700' },
+  ANNULE:   { texte: 'Annulé', classe: 'bg-red-100 text-red-800' },
+};
 
 export default function VolsPage(): React.ReactElement {
+  const { user } = useAuthStore();
+  const [formulaire, setFormulaire] = useState(false);
+
+  const { data: vols, isLoading } = useQuery({ queryKey: ['vols'], queryFn: volService.lister });
+
+  const peutCreer = Boolean(
+    user && (ROLES_CREATION_VOL as readonly string[]).includes(user.role),
+  );
+
   return (
-    <Routes>
-      <Route index element={<VolsListPage />} />
-      <Route path="nouveau" element={<NouveauVolPage />} />
-    </Routes>
+    <div className="p-6">
+      <header className="mb-6 flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-slate-900">Vols</h1>
+          <p className="text-sm text-slate-500">
+            Un vol planifié n'est visible que de sa base et du sous-chef opérations
+            tant que les quotas ne sont pas alloués.
+          </p>
+        </div>
+        {peutCreer && (
+          <button
+            type="button"
+            onClick={() => setFormulaire(true)}
+            className="inline-flex items-center gap-2 rounded bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800"
+          >
+            <Plus className="h-4 w-4" /> Planifier un vol
+          </button>
+        )}
+      </header>
+
+      {isLoading && (
+        <p className="flex items-center gap-2 text-sm text-slate-500">
+          <Loader2 className="h-4 w-4 animate-spin" /> Chargement…
+        </p>
+      )}
+
+      {!isLoading && !vols?.length && (
+        <p className="rounded-lg border border-dashed border-slate-200 p-8 text-center text-sm italic text-slate-400">
+          Aucun vol visible dans votre périmètre.
+        </p>
+      )}
+
+      <ul className="space-y-2">
+        {vols?.map((v) => <CarteVol key={v.id} vol={v} />)}
+      </ul>
+
+      {formulaire && <FormulaireVol onFermer={() => setFormulaire(false)} />}
+    </div>
+  );
+}
+
+function CarteVol({ vol }: { vol: Vol }): React.ReactElement {
+  const statut = LIBELLE_STATUT[vol.statut] ?? { texte: vol.statut, classe: 'bg-slate-100' };
+  return (
+    <li className="rounded-lg border border-slate-200 bg-white px-4 py-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="flex items-center gap-2 font-medium text-slate-900">
+            <Plane className="h-4 w-4 text-blue-700" />
+            {vol.numero_mission}
+            <span className={`rounded px-2 py-0.5 text-xs font-normal ${statut.classe}`}>
+              {statut.texte}
+            </span>
+          </p>
+          <p className="mt-1 text-sm text-slate-600">
+            {vol.itineraire.map((p) => p.base.code_base).join(' → ')}
+          </p>
+          <p className="text-xs text-slate-500">
+            {new Date(vol.date_heure).toLocaleString('fr-FR',
+              { dateStyle: 'full', timeStyle: 'short' })}
+            {' — '}{vol.immatriculation}
+            {' — '}{vol.capacite_places} places / {Number(vol.capacite_cargo_kg)} kg
+            {' — CDB '}{vol.combord_grade} {vol.combord_nom}
+          </p>
+        </div>
+
+        {/* Quotas : lisibles dès l'allocation, point par point. */}
+        {vol.statut !== 'PLANIFIE' && (
+          <ul className="flex flex-wrap gap-2 text-xs">
+            {vol.itineraire.slice(0, -1).map((p) => (
+              <li key={p.id} className="rounded border border-slate-200 px-2 py-1 text-slate-600">
+                {p.base.code_base} :{' '}
+                {p.quota_places ?? '—'} pl. / {p.quota_masse_kg ? Number(p.quota_masse_kg) : '—'} kg
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </li>
+  );
+}
+
+// ─── Formulaire de planification ───────────────────────────────────────────
+
+function FormulaireVol({ onFermer }: { onFermer: () => void }): React.ReactElement {
+  const { user } = useAuthStore();
+  const qc = useQueryClient();
+
+  const { data: bases } = useQuery({ queryKey: ['bases'], queryFn: referentielService.bases });
+  const { data: aeronefs } = useQuery({ queryKey: ['aeronefs'], queryFn: referentielService.aeronefs });
+  const { data: personnels } = useQuery({
+    queryKey: ['personnels'],
+    queryFn: () => api.get<Personnel[]>('/referentiel/personnels').then((r) => r.data),
+  });
+
+  const combords = useMemo(
+    () => (personnels ?? []).filter((p) => p.role === RoleUtilisateur.COMBORD && p.actif),
+    [personnels],
+  );
+
+  const [numero, setNumero] = useState('');
+  const [immat, setImmat] = useState('');
+  const [dateHeure, setDateHeure] = useState('');
+  const [typeMission, setTypeMission] = useState<TypeMission | ''>('');
+  const [places, setPlaces] = useState('');
+  const [cargo, setCargo] = useState('');
+  const [combordId, setCombordId] = useState('');
+  const [etapes, setEtapes] = useState<string[]>([]);
+
+  const baseDepart = bases?.find((b) => b.id === user?.base_id);
+  const aeronef = aeronefs?.find((a) => a.immatriculation === immat);
+
+  const creation = useMutation({
+    mutationFn: (dto: Record<string, unknown>) => volService.creer(dto),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['vols'] });
+      toast.success('Vol planifié. Le sous-chef opérations va allouer les quotas.');
+      onFermer();
+    },
+    onError: (e) => toast.error(messageErreur(e)),
+  });
+
+  /** Capacités pré-remplies à la sélection de l'appareil, et modifiables. */
+  function choisirAeronef(valeur: string): void {
+    setImmat(valeur);
+    const a = aeronefs?.find((x) => x.immatriculation === valeur);
+    if (a) {
+      setPlaces(String(a.capacite_places));
+      setCargo(String(Number(a.capacite_cargo_kg)));
+    }
+  }
+
+  function ajouterEtape(baseId: string): void {
+    if (!baseId) return;
+    // Un point consécutif identique est refusé ICI aussi, pas seulement côté
+    // serveur : signaler l'erreur au moment du clic évite un aller-retour et
+    // une erreur en fin de saisie, quand tout le reste est déjà rempli.
+    const precedent = etapes.length ? etapes[etapes.length - 1] : user?.base_id;
+    if (baseId === precedent) {
+      toast.error('Deux points consécutifs ne peuvent pas être la même base.');
+      return;
+    }
+    setEtapes((e) => [...e, baseId]);
+  }
+
+  function deplacer(index: number, delta: number): void {
+    const cible = index + delta;
+    if (cible < 0 || cible >= etapes.length) return;
+    const copie = [...etapes];
+    [copie[index], copie[cible]] = [copie[cible], copie[index]];
+    setEtapes(copie);
+  }
+
+  const itineraireComplet = useMemo(
+    () => [user?.base_id ?? '', ...etapes],
+    [etapes, user?.base_id],
+  );
+
+  const consecutifInvalide = useMemo(() => {
+    for (let i = 1; i < itineraireComplet.length; i++) {
+      if (itineraireComplet[i] === itineraireComplet[i - 1]) return i;
+    }
+    return null;
+  }, [itineraireComplet]);
+
+  const complet = Boolean(
+    numero && immat && dateHeure && typeMission && places && cargo
+    && combordId && etapes.length && consecutifInvalide === null,
+  );
+
+  function envoyer(): void {
+    const cdb = combords.find((c) => c.id === combordId);
+    if (!cdb) {
+      toast.error('Sélectionnez un commandant de bord.');
+      return;
+    }
+    creation.mutate({
+      numero_mission: numero.trim().toUpperCase(),
+      immatriculation: immat,
+      date_heure: new Date(dateHeure).toISOString(),
+      type_mission: typeMission,
+      capacite_places: Number(places),
+      capacite_cargo_kg: Number(cargo),
+      combord_id: cdb.id,
+      combord_grade: cdb.grade,
+      combord_nom: cdb.nom,
+      combord_prenom: cdb.prenom,
+      itineraire: etapes.map((base_id) => ({ base_id })),
+    });
+  }
+
+  const nomBase = (id: string): string => {
+    const b = bases?.find((x) => x.id === id);
+    return b ? `${b.code_base} — ${b.nom}` : id;
+  };
+
+  return (
+    <div className="fixed inset-0 z-40 flex justify-end bg-slate-900/20">
+      <div className="flex w-full max-w-2xl flex-col bg-white shadow-xl">
+        <header className="flex items-start justify-between border-b border-slate-200 px-5 py-4">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Planifier un vol</h2>
+            <p className="text-sm text-slate-500">
+              Le départ est votre base d'affectation ; elle ne se choisit pas.
+            </p>
+          </div>
+          <button type="button" onClick={onFermer} aria-label="Fermer"
+                  className="rounded p-1 text-slate-500 hover:bg-slate-100">
+            <X className="h-5 w-5" />
+          </button>
+        </header>
+
+        <div className="flex-1 space-y-5 overflow-y-auto px-5 py-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Champ label="N° de mission" obligatoire>
+              <input value={numero} onChange={(e) => setNumero(e.target.value.toUpperCase())}
+                     placeholder="MIS-2026-014" className={CLASSE_INPUT} />
+            </Champ>
+
+            <Champ label="Date et heure de départ" obligatoire>
+              <input type="datetime-local" value={dateHeure}
+                     onChange={(e) => setDateHeure(e.target.value)} className={CLASSE_INPUT} />
+            </Champ>
+
+            <Champ label="Aéronef" obligatoire>
+              <select value={immat} onChange={(e) => choisirAeronef(e.target.value)}
+                      className={CLASSE_INPUT}>
+                <option value="">— Sélectionner —</option>
+                {aeronefs?.filter((a) => a.actif).map((a: AeronefDB) => (
+                  <option key={a.immatriculation} value={a.immatriculation}>
+                    {a.immatriculation} — {a.type} ({a.capacite_places} pl.)
+                  </option>
+                ))}
+              </select>
+            </Champ>
+
+            <Champ label="Type de mission" obligatoire>
+              <select value={typeMission}
+                      onChange={(e) => setTypeMission(e.target.value as TypeMission)}
+                      className={CLASSE_INPUT}>
+                <option value="">— Sélectionner —</option>
+                {TYPES_MISSION.map((t) => (
+                  <option key={t.value} value={t.value}>{t.label}</option>
+                ))}
+              </select>
+            </Champ>
+
+            <Champ
+              label="Places retenues" obligatoire
+              aide={aeronef ? `Maximum appareil : ${aeronef.capacite_places}` : undefined}
+            >
+              <input type="number" min={1} value={places}
+                     onChange={(e) => setPlaces(e.target.value)} className={CLASSE_INPUT} />
+            </Champ>
+
+            <Champ
+              label="Masse retenue (kg)" obligatoire
+              aide={aeronef ? `Maximum appareil : ${Number(aeronef.capacite_cargo_kg)} kg` : undefined}
+            >
+              <input type="number" min={0} step="0.01" value={cargo}
+                     onChange={(e) => setCargo(e.target.value)} className={CLASSE_INPUT} />
+            </Champ>
+          </div>
+
+          <Champ
+            label="Commandant de bord" obligatoire
+            aide="Sans compte rattaché, le visa final du manifeste ne pourra pas être apposé."
+          >
+            <select value={combordId} onChange={(e) => setCombordId(e.target.value)}
+                    className={CLASSE_INPUT}>
+              <option value="">— Sélectionner —</option>
+              {combords.map((c) => (
+                <option key={c.id} value={c.id}>{c.grade} {c.nom} {c.prenom}</option>
+              ))}
+            </select>
+            {!combords.length && personnels && (
+              <p className="mt-1 text-xs text-red-600">
+                Aucun compte au rôle « commandant de bord » n'est actif. Un administrateur
+                doit en créer un avant toute planification.
+              </p>
+            )}
+          </Champ>
+
+          {/* ── Itinéraire ── */}
+          <section>
+            <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-slate-600">
+              <MapPin className="h-4 w-4" /> Itinéraire
+            </h3>
+            <p className="mb-3 text-xs text-slate-500">
+              Une base peut revenir plusieurs fois — c'est le cas de l'aller-retour.
+              Seuls deux points <em>consécutifs</em> identiques sont refusés.
+            </p>
+
+            <ol className="space-y-2">
+              <li className="flex items-center gap-3 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+                <span className="w-6 text-center font-medium text-slate-500">1</span>
+                <span className="flex-1 text-slate-800">
+                  {baseDepart ? `${baseDepart.code_base} — ${baseDepart.nom}` : 'Votre base'}
+                </span>
+                <span className="text-xs italic text-slate-500">Départ imposé</span>
+              </li>
+
+              {etapes.map((baseId, i) => (
+                <li key={`${baseId}-${i}`}
+                    className="flex items-center gap-3 rounded border border-slate-200 px-3 py-2 text-sm">
+                  <span className="w-6 text-center font-medium text-slate-500">{i + 2}</span>
+                  <span className="flex-1 text-slate-800">{nomBase(baseId)}</span>
+                  {i === etapes.length - 1 && (
+                    <span className="text-xs italic text-slate-500">Destination finale</span>
+                  )}
+                  <button type="button" onClick={() => deplacer(i, -1)} disabled={i === 0}
+                          aria-label="Monter"
+                          className="rounded p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-30">
+                    <ChevronUp className="h-4 w-4" />
+                  </button>
+                  <button type="button" onClick={() => deplacer(i, 1)}
+                          disabled={i === etapes.length - 1} aria-label="Descendre"
+                          className="rounded p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-30">
+                    <ChevronDown className="h-4 w-4" />
+                  </button>
+                  <button type="button" aria-label="Retirer"
+                          onClick={() => setEtapes((e) => e.filter((_, j) => j !== i))}
+                          className="rounded p-1 text-red-600 hover:bg-red-50">
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </li>
+              ))}
+            </ol>
+
+            <div className="mt-3 flex gap-2">
+              <select
+                value=""
+                onChange={(e) => ajouterEtape(e.target.value)}
+                className={CLASSE_INPUT}
+              >
+                <option value="">— Ajouter un point —</option>
+                {bases?.map((b: BaseDB) => (
+                  <option key={b.id} value={b.id}>{b.code_base} — {b.nom}</option>
+                ))}
+              </select>
+            </div>
+
+            {consecutifInvalide !== null && (
+              <p className="mt-2 text-xs text-red-600">
+                Les points {consecutifInvalide} et {consecutifInvalide + 1} portent la même base.
+              </p>
+            )}
+          </section>
+        </div>
+
+        <footer className="flex items-center justify-end gap-3 border-t border-slate-200 px-5 py-4">
+          <button type="button" onClick={onFermer}
+                  className="rounded px-4 py-2 text-sm text-slate-600 hover:bg-slate-100">
+            Annuler
+          </button>
+          <button
+            type="button" onClick={envoyer} disabled={!complet || creation.isPending}
+            className="inline-flex items-center gap-2 rounded bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800 disabled:opacity-50"
+          >
+            {creation.isPending
+              ? <Loader2 className="h-4 w-4 animate-spin" />
+              : <Plus className="h-4 w-4" />}
+            Planifier
+          </button>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+const CLASSE_INPUT =
+  'w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-blue-600 focus:outline-none';
+
+function Champ(
+  { label, obligatoire, aide, children }: {
+    label: string; obligatoire?: boolean; aide?: string; children: React.ReactNode;
+  },
+): React.ReactElement {
+  return (
+    <div>
+      <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
+        {label}{obligatoire && <span className="ml-1 text-red-600">*</span>}
+      </label>
+      <div className="mt-1">{children}</div>
+      {aide && <p className="mt-1 text-xs text-slate-500">{aide}</p>}
+    </div>
   );
 }

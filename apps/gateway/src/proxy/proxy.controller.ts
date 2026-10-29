@@ -1,4 +1,9 @@
 // apps/gateway/src/proxy/proxy.controller.ts
+//
+// Les routes `validations/*` ont DISPARU : validation-service est supprimé.
+// Elles sont remplacées par `listes/*`, qui porte le circuit complet, et par
+// `potentialites/*` pour le vivier.
+
 import { All, Controller, Req, Res, UseGuards } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { JwtAuthGuard } from '@sigea/shared-auth';
@@ -8,7 +13,7 @@ import { ProxyService } from './proxy.service';
 export class ProxyController {
   constructor(private readonly proxyService: ProxyService) {}
 
-  // ── AUTH (public) ──────────────────────────────────────────────────────────
+  // ── AUTH (public) ────────────────────────────────────────────────────────
   @All('auth')
   proxyAuthRoot(@Req() req: Request, @Res() res: Response): Promise<void> {
     return this.proxyService.forward(req, res, 'auth');
@@ -18,164 +23,182 @@ export class ProxyController {
     return this.proxyService.forward(req, res, 'auth');
   }
 
-  // ── HEALTH endpoints (public — pour monitoring) ────────────────────────────
+  // ── HEALTH (public, supervision) ─────────────────────────────────────────
   @All('referentiel/health')
-  proxyReferentielHealth(@Req() req: Request, @Res() res: Response): Promise<void> {
+  hReferentiel(@Req() req: Request, @Res() res: Response): Promise<void> {
     return this.proxyService.forward(req, res, 'referentiel');
   }
   @All('vols/health')
-  proxyVolHealth(@Req() req: Request, @Res() res: Response): Promise<void> {
+  hVol(@Req() req: Request, @Res() res: Response): Promise<void> {
     return this.proxyService.forward(req, res, 'vol');
   }
+  @All('listes/health')
+  hListe(@Req() req: Request, @Res() res: Response): Promise<void> {
+    return this.proxyService.forward(req, res, 'liste');
+  }
   @All('manifestes/health')
-  proxyManifesteHealth(@Req() req: Request, @Res() res: Response): Promise<void> {
+  hManifeste(@Req() req: Request, @Res() res: Response): Promise<void> {
     return this.proxyService.forward(req, res, 'manifeste');
   }
-  @All('validations/health')
-  proxyValidationHealth(@Req() req: Request, @Res() res: Response): Promise<void> {
-    return this.proxyService.forward(req, res, 'validation');
-  }
   @All('cemaa/health')
-  proxyCemaaHealth(@Req() req: Request, @Res() res: Response): Promise<void> {
+  hCemaa(@Req() req: Request, @Res() res: Response): Promise<void> {
     return this.proxyService.forward(req, res, 'cemaa');
   }
   @All('notifications/health')
-  proxyNotifHealth(@Req() req: Request, @Res() res: Response): Promise<void> {
+  hNotif(@Req() req: Request, @Res() res: Response): Promise<void> {
     return this.proxyService.forward(req, res, 'notification');
   }
   @All('pdf/health')
-  proxyPdfHealth(@Req() req: Request, @Res() res: Response): Promise<void> {
+  hPdf(@Req() req: Request, @Res() res: Response): Promise<void> {
     return this.proxyService.forward(req, res, 'pdf');
   }
 
-  // ── REFERENTIEL ────────────────────────────────────────────────────────────
+  // ── REFERENTIEL ──────────────────────────────────────────────────────────
   @All('referentiel')
   @UseGuards(JwtAuthGuard)
-  proxyReferentielRoot(@Req() req: Request, @Res() res: Response): Promise<void> {
+  referentielRoot(@Req() req: Request, @Res() res: Response): Promise<void> {
     return this.proxyService.forward(req, res, 'referentiel');
   }
   @All('referentiel/*path')
   @UseGuards(JwtAuthGuard)
-  proxyReferentiel(@Req() req: Request, @Res() res: Response): Promise<void> {
+  referentiel(@Req() req: Request, @Res() res: Response): Promise<void> {
     return this.proxyService.forward(req, res, 'referentiel');
   }
 
-  // ── VOLS ───────────────────────────────────────────────────────────────────
+  // ── VOLS (planification, diffusion SCOPS) ────────────────────────────────
   @All('vols')
   @UseGuards(JwtAuthGuard)
-  proxyVolsRoot(@Req() req: Request, @Res() res: Response): Promise<void> {
+  volsRoot(@Req() req: Request, @Res() res: Response): Promise<void> {
     return this.proxyService.forward(req, res, 'vol');
   }
   @All('vols/*path')
   @UseGuards(JwtAuthGuard)
-  proxyVols(@Req() req: Request, @Res() res: Response): Promise<void> {
+  vols(@Req() req: Request, @Res() res: Response): Promise<void> {
     return this.proxyService.forward(req, res, 'vol');
   }
 
-  // ── MANIFESTES ─────────────────────────────────────────────────────────────
+  // ── LISTES (constitution, discrimination, circuit) ───────────────────────
+  @All('listes')
+  @UseGuards(JwtAuthGuard)
+  listesRoot(@Req() req: Request, @Res() res: Response): Promise<void> {
+    return this.proxyService.forward(req, res, 'liste');
+  }
+  @All('listes/*path')
+  @UseGuards(JwtAuthGuard)
+  listes(@Req() req: Request, @Res() res: Response): Promise<void> {
+    return this.proxyService.forward(req, res, 'liste');
+  }
+
+  // ── POTENTIALITES (vivier du secrétaire) ─────────────────────────────────
+  @All('potentialites')
+  @UseGuards(JwtAuthGuard)
+  potentialitesRoot(@Req() req: Request, @Res() res: Response): Promise<void> {
+    return this.proxyService.forward(req, res, 'liste');
+  }
+  @All('potentialites/*path')
+  @UseGuards(JwtAuthGuard)
+  potentialites(@Req() req: Request, @Res() res: Response): Promise<void> {
+    return this.proxyService.forward(req, res, 'liste');
+  }
+
+  // ── MANIFESTES (lecture, impression) ─────────────────────────────────────
   @All('manifestes')
   @UseGuards(JwtAuthGuard)
-  proxyManifestesRoot(@Req() req: Request, @Res() res: Response): Promise<void> {
+  manifestesRoot(@Req() req: Request, @Res() res: Response): Promise<void> {
     return this.proxyService.forward(req, res, 'manifeste');
   }
   @All('manifestes/*path')
   @UseGuards(JwtAuthGuard)
-  proxyManifestes(@Req() req: Request, @Res() res: Response): Promise<void> {
+  manifestes(@Req() req: Request, @Res() res: Response): Promise<void> {
     return this.proxyService.forward(req, res, 'manifeste');
   }
 
-    // ── EXPLOITATION ───────────────────────────────────────────────────────────
   @All('exploitation')
   @UseGuards(JwtAuthGuard)
-  proxyExploitationRoot(@Req() req: Request, @Res() res: Response): Promise<void> {
+  exploitationRoot(@Req() req: Request, @Res() res: Response): Promise<void> {
     return this.proxyService.forward(req, res, 'manifeste');
   }
   @All('exploitation/*path')
   @UseGuards(JwtAuthGuard)
-  proxyExploitation(@Req() req: Request, @Res() res: Response): Promise<void> {
+  exploitation(@Req() req: Request, @Res() res: Response): Promise<void> {
     return this.proxyService.forward(req, res, 'manifeste');
   }
 
-  // ── VALIDATIONS ────────────────────────────────────────────────────────────
-  @All('validations')
-  @UseGuards(JwtAuthGuard)
-  proxyValidationsRoot(@Req() req: Request, @Res() res: Response): Promise<void> {
-    return this.proxyService.forward(req, res, 'validation');
-  }
-  @All('validations/*path')
-  @UseGuards(JwtAuthGuard)
-  proxyValidations(@Req() req: Request, @Res() res: Response): Promise<void> {
-    return this.proxyService.forward(req, res, 'validation');
-  }
-
-  // ── CEMAA ──────────────────────────────────────────────────────────────────
+  // ── AUTORITES CENTRALES — espace conservé pour les urgences ──────────────
   @All('cemaa')
   @UseGuards(JwtAuthGuard)
-  proxyCemaaRoot(@Req() req: Request, @Res() res: Response): Promise<void> {
+  cemaaRoot(@Req() req: Request, @Res() res: Response): Promise<void> {
     return this.proxyService.forward(req, res, 'cemaa');
   }
   @All('cemaa/*path')
   @UseGuards(JwtAuthGuard)
-  proxyCemaa(@Req() req: Request, @Res() res: Response): Promise<void> {
+  cemaa(@Req() req: Request, @Res() res: Response): Promise<void> {
     return this.proxyService.forward(req, res, 'cemaa');
   }
-
-    // ── MAGE ───────────────────────────────────────────────────────────────────
   @All('mage')
   @UseGuards(JwtAuthGuard)
-  proxyMageRoot(@Req() req: Request, @Res() res: Response): Promise<void> {
+  mageRoot(@Req() req: Request, @Res() res: Response): Promise<void> {
     return this.proxyService.forward(req, res, 'cemaa');
   }
   @All('mage/*path')
   @UseGuards(JwtAuthGuard)
-  proxyMage(@Req() req: Request, @Res() res: Response): Promise<void> {
+  mage(@Req() req: Request, @Res() res: Response): Promise<void> {
     return this.proxyService.forward(req, res, 'cemaa');
   }
 
-  // ── NOTIFICATIONS ──────────────────────────────────────────────────────────
+  // ── NOTIFICATIONS ────────────────────────────────────────────────────────
   @All('notifications')
   @UseGuards(JwtAuthGuard)
-  proxyNotifRoot(@Req() req: Request, @Res() res: Response): Promise<void> {
+  notifRoot(@Req() req: Request, @Res() res: Response): Promise<void> {
     return this.proxyService.forward(req, res, 'notification');
   }
   @All('notifications/*path')
   @UseGuards(JwtAuthGuard)
-  proxyNotif(@Req() req: Request, @Res() res: Response): Promise<void> {
+  notif(@Req() req: Request, @Res() res: Response): Promise<void> {
+    return this.proxyService.forward(req, res, 'notification');
+  }
+  @All('messagerie')
+  @UseGuards(JwtAuthGuard)
+  messagerieRoot(@Req() req: Request, @Res() res: Response): Promise<void> {
+    return this.proxyService.forward(req, res, 'notification');
+  }
+  @All('messagerie/*path')
+  @UseGuards(JwtAuthGuard)
+  messagerie(@Req() req: Request, @Res() res: Response): Promise<void> {
     return this.proxyService.forward(req, res, 'notification');
   }
 
-  // ── PDF ────────────────────────────────────────────────────────────────────
+  // ── PDF ──────────────────────────────────────────────────────────────────
   @All('pdf')
   @UseGuards(JwtAuthGuard)
-  proxyPdfRoot(@Req() req: Request, @Res() res: Response): Promise<void> {
+  pdfRoot(@Req() req: Request, @Res() res: Response): Promise<void> {
     return this.proxyService.forward(req, res, 'pdf');
   }
   @All('pdf/*path')
   @UseGuards(JwtAuthGuard)
-  proxyPdf(@Req() req: Request, @Res() res: Response): Promise<void> {
+  pdf(@Req() req: Request, @Res() res: Response): Promise<void> {
     return this.proxyService.forward(req, res, 'pdf');
   }
 
-  // ── VÉRIFICATION PUBLIQUE ──────────────────────────────────────────────────
+  // ── VERIFICATION PUBLIQUE ────────────────────────────────────────────────
   //
-  // SANS JwtAuthGuard, délibérément : c'est le point de scan du QR imprimé sur
-  // le manifeste, utilisé par un contrôleur au sol qui n'a pas de compte SIGEA.
-  // Le pdf-service ne renvoie ici qu'un verdict d'authenticité — jamais le
-  // contenu du manifeste. Le débit y est limité côté service (20 req/min).
+  // SANS JwtAuthGuard, délibérément : point de scan du QR imprimé sur le
+  // manifeste, utilisé par un contrôleur au sol sans compte SIGEA. Le
+  // pdf-service n'y renvoie qu'un verdict d'authenticité, jamais le contenu.
   @All('verification/*path')
-  proxyVerification(@Req() req: Request, @Res() res: Response): Promise<void> {
+  verification(@Req() req: Request, @Res() res: Response): Promise<void> {
     return this.proxyService.forward(req, res, 'pdf');
   }
 
-  // ── ADMIN ──────────────────────────────────────────────────────────────────
+  // ── ADMIN ────────────────────────────────────────────────────────────────
   @All('admin')
   @UseGuards(JwtAuthGuard)
-  proxyAdminRoot(@Req() req: Request, @Res() res: Response): Promise<void> {
+  adminRoot(@Req() req: Request, @Res() res: Response): Promise<void> {
     return this.proxyService.forward(req, res, 'referentiel');
   }
   @All('admin/*path')
   @UseGuards(JwtAuthGuard)
-  proxyAdmin(@Req() req: Request, @Res() res: Response): Promise<void> {
+  admin(@Req() req: Request, @Res() res: Response): Promise<void> {
     return this.proxyService.forward(req, res, 'referentiel');
   }
 }

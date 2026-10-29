@@ -11,8 +11,9 @@ import { toast } from 'sonner';
 import {
   Card, Field, Badge, Modal, StatMini,
   ROLES, BASES_FAC, GRADES, MAX_ECHECS,
+  BASE_ETAT_MAJOR, exigeBase, exigeEscadron,
   messageErreur, dateFr,
-  type Utilisateur,
+  type Utilisateur, type EscadronVue,
 } from './admin.shared';
 import InterimTab from './InterimTab';
 import MouvementsTab from './MouvementsTab';
@@ -66,8 +67,10 @@ function UtilisateursTab(): React.ReactElement {
   const [aDebloquer, setADebloquer] = useState<Utilisateur | null>(null);
   const [form, setForm] = useState({
     nom: '', prenom: '', grade: '', login: '', role: '',
-    base_id: '', password: '', confirm_password: '',
+    base_id: '', escadron_id: '', password: '', confirm_password: '',
   });
+  /** Référentiel des escadrons, nécessaire au rattachement d'un COMEA. */
+  const [escadrons, setEscadrons] = useState<EscadronVue[]>([]);
   const [saving, setSaving] = useState(false);
 
   const fetchUsers = useCallback(async () => {
@@ -78,26 +81,45 @@ function UtilisateursTab(): React.ReactElement {
     finally { setLoading(false); }
   }, []);
 
+  // Les escadrons ne servent qu'au rattachement d'un COMEA. Leur indisponibilité
+  // ne doit pas bloquer la gestion des utilisateurs : l'échec est avalé et le
+  // champ concerné explique alors pourquoi il est vide.
+  useEffect(() => {
+    api.get<EscadronVue[]>('/referentiel/escadrons')
+      .then(r => setEscadrons(r.data.filter(e => e.actif)))
+      .catch(() => setEscadrons([]));
+  }, []);
+
   useEffect(() => { fetchUsers(); }, [fetchUsers]);
 
   const set = (k: string) => (v: string): void => setForm(f => ({ ...f, [k]: v }));
 
   const openCreate = (): void => {
     setEditUser(null);
-    setForm({ nom:'', prenom:'', grade:'', login:'', role:'', base_id:'', password:'', confirm_password:'' });
+    setForm({ nom:'', prenom:'', grade:'', login:'', role:'', base_id:'',
+              escadron_id:'', password:'', confirm_password:'' });
     setShowModal(true);
   };
 
   const openEdit = (u: Utilisateur): void => {
     setEditUser(u);
     setForm({ nom: u.nom, prenom: u.prenom, grade: u.grade, login: u.login,
-      role: u.role, base_id: u.base_id, password: '', confirm_password: '' });
+      role: u.role, base_id: u.base_id, escadron_id: u.escadron_id ?? '',
+      password: '', confirm_password: '' });
     setShowModal(true);
   };
 
   const handleSave = async (): Promise<void> => {
-    if (!form.nom || !form.prenom || !form.login || !form.role || !form.base_id) {
+    if (!form.nom || !form.prenom || !form.login || !form.role) {
       toast.error('Champs obligatoires manquants'); return;
+    }
+    // Les rôles d'autorité centrale ne sont pas rattachés à une base : le champ
+    // est masqué et une valeur conventionnelle est envoyée à sa place.
+    if (exigeBase(form.role) && !form.base_id) {
+      toast.error("La base d'affectation est obligatoire pour ce rôle"); return;
+    }
+    if (exigeEscadron(form.role) && !form.escadron_id) {
+      toast.error("Un COMEA doit être rattaché à un escadron"); return;
     }
     if (!editUser && !form.password) {
       toast.error('Mot de passe requis pour la création'); return;
@@ -112,8 +134,13 @@ function UtilisateursTab(): React.ReactElement {
     try {
       const payload: Record<string, string> = {
         nom: form.nom, prenom: form.prenom, grade: form.grade,
-        login: form.login, role: form.role, base_id: form.base_id,
+        login: form.login, role: form.role,
+        // `base_id` est NON NULL au schéma : une valeur doit partir même pour
+        // un rôle d'autorité centrale. BASE_ETAT_MAJOR rend le rattachement
+        // lisible au lieu de laisser un BA101 trompeur.
+        base_id: exigeBase(form.role) ? form.base_id : BASE_ETAT_MAJOR,
       };
+      if (exigeEscadron(form.role) && form.escadron_id) payload.escadron_id = form.escadron_id;
       if (form.password) payload.password = form.password;
 
       if (editUser) {
@@ -376,9 +403,42 @@ function UtilisateursTab(): React.ReactElement {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
             <Field label="Rôle" value={form.role} onChange={set('role')} required
               options={ROLES.map(r => ({ value: r.value, label: r.label }))} />
-            <Field label="Base d'affectation" value={form.base_id} onChange={set('base_id')} required
-              options={BASES_FAC.map(b => ({ value: b.id, label: `${b.code} — ${b.nom.split(' ').slice(-1)[0]}` }))} />
+
+            {/* La base n'est demandée que pour les rôles qui en dépendent.
+                ADMIN, CEMAA et MAGE exercent une autorité centrale : leur
+                imposer une base fausse tous les décomptes « par base ». */}
+            {exigeBase(form.role) ? (
+              <Field label="Base d'affectation" value={form.base_id} onChange={set('base_id')} required
+                options={BASES_FAC.map(b => ({ value: b.id, label: `${b.code} — ${b.nom.split(' ').slice(-1)[0]}` }))} />
+            ) : form.role ? (
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ display: 'block', fontSize: 11, fontWeight: 600,
+                  color: T.textSub, marginBottom: 5 }}>Rattachement</label>
+                <div style={{ padding: '9px 12px', background: T.bgAlt,
+                  border: `1px solid ${T.border}`, borderRadius: 6,
+                  fontSize: 13, color: T.textDim }}>
+                  Autorité centrale — sans base
+                </div>
+                <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 5, lineHeight: 1.5 }}>
+                  Ce rôle n&apos;est pas rattaché à une base aérienne.
+                </div>
+              </div>
+            ) : <div />}
           </div>
+
+          {/* Escadron : uniquement pour un COMEA, qui commande un escadron. */}
+          {exigeEscadron(form.role) && (
+            <Field label="Escadron commandé" value={form.escadron_id} onChange={set('escadron_id')}
+              required
+              options={escadrons
+                .filter(e => !form.base_id || e.base_id === form.base_id)
+                .map(e => ({ value: e.id, label: `${e.libelle} (${e.base?.code_base ?? ''})` }))}
+              aide={escadrons.length === 0
+                ? "Aucun escadron n'a pu être chargé. Créez-en un dans l'onglet Escadrons, ou vérifiez que le référentiel répond."
+                : form.base_id
+                  ? 'Seuls les escadrons de la base retenue sont proposés.'
+                  : "Choisissez d'abord une base pour restreindre la liste."} />
+          )}
 
           <div style={{ padding: '10px 14px', background: T.amberBg,
             border: `1px solid ${T.amberBorder}`, borderRadius: 6,
@@ -959,6 +1019,16 @@ function SecuriteMfaTab(): React.ReactElement {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
 
+  // ── Filtres du journal d'alertes ──
+  // La route renvoie jusqu'à 200 lignes de natures très différentes (nouvel
+  // appareil, nouvelle IP, compte verrouillé, MFA réinitialisé…). Sans tri,
+  // l'alerte critique se noie dans le bruit — c'est exactement ce qui rendait
+  // un compte verrouillé invisible.
+  const [fNiveau, setFNiveau] = useState('');
+  const [fType, setFType] = useState('');
+  const [fRecherche, setFRecherche] = useState('');
+  const [fBase, setFBase] = useState('');
+
   const load = useCallback(async () => {
     try {
       const [r, a] = await Promise.all([
@@ -984,12 +1054,35 @@ function SecuriteMfaTab(): React.ReactElement {
   const niveauColor = (n: string): string =>
     n === 'CRITIQUE' ? T.red : n === 'ALERTE' ? T.amberLight : T.blue;
 
+  // Les types présents sont déduits des données reçues, jamais codés en dur :
+  // le service peut en introduire de nouveaux sans qu'un écran les masque.
+  const typesPresents = Array.from(new Set(alerts.map(a => a.type))).sort();
+
+  const alertesFiltrees = alerts.filter(a => {
+    const texte = `${a.type} ${a.message} ${a.ip ?? ''} ${a.utilisateur?.nom ?? ''} ${a.utilisateur?.prenom ?? ''} ${a.utilisateur?.login ?? ''}`.toLowerCase();
+    return (!fNiveau || a.niveau === fNiveau)
+      && (!fType || a.type === fType)
+      && (!fBase || a.utilisateur?.base_id === fBase)
+      && (!fRecherche || texte.includes(fRecherche.toLowerCase()));
+  });
+
+  const compteNiveau = (n: string): number => alerts.filter(a => a.niveau === n).length;
+  const filtreActif = Boolean(fNiveau || fType || fBase || fRecherche);
+
   return (
     <div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12, marginBottom: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 20 }}>
         <StatMini label="Demandes en attente" value={requests.length} color={T.amberLight} />
-        <StatMini label="Alertes critiques" value={alerts.filter(a => a.niveau === 'CRITIQUE').length} color={T.red} />
-        <StatMini label="Alertes totales" value={alerts.length} color={T.blue} />
+        {/* Cliquables : chaque vignette filtre le journal sur son niveau. */}
+        <StatMini label="Critiques" value={compteNiveau('CRITIQUE')} color={T.red}
+                  actif={fNiveau === 'CRITIQUE'}
+                  onClick={() => setFNiveau(fNiveau === 'CRITIQUE' ? '' : 'CRITIQUE')} />
+        <StatMini label="Alertes" value={compteNiveau('ALERTE')} color={T.amberLight}
+                  actif={fNiveau === 'ALERTE'}
+                  onClick={() => setFNiveau(fNiveau === 'ALERTE' ? '' : 'ALERTE')} />
+        <StatMini label="Total journal" value={alerts.length} color={T.blue}
+                  actif={fNiveau === ''}
+                  onClick={() => setFNiveau('')} />
       </div>
 
       {/* Demandes de réinitialisation MFA */}
@@ -1040,16 +1133,65 @@ function SecuriteMfaTab(): React.ReactElement {
       {/* Journal des alertes de sécurité */}
       <Card>
         <div style={{ padding: '14px 20px', borderBottom: `1px solid ${T.border}`,
-          fontSize: 13, fontWeight: 600, color: T.text }}>
-          Alertes de sécurité (niveau 1 / critique)
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: T.text }}>
+            Journal des alertes
+            <span style={{ fontSize: 11, fontWeight: 400, color: T.textDim, marginLeft: 8 }}>
+              {filtreActif
+                ? `${alertesFiltrees.length} sur ${alerts.length}`
+                : `${alerts.length} entrée${alerts.length > 1 ? 's' : ''}`}
+            </span>
+          </span>
+          {filtreActif && (
+            <button className="ad-btn"
+              onClick={() => { setFNiveau(''); setFType(''); setFBase(''); setFRecherche(''); }}
+              style={{ padding: '5px 12px', background: T.bgAlt,
+                border: `1px solid ${T.border}`, borderRadius: 5, color: T.textSub,
+                fontSize: 11, cursor: 'pointer' }}>Réinitialiser les filtres</button>
+          )}
         </div>
+
+        <div style={{ padding: '12px 20px', borderBottom: `1px solid ${T.border}`,
+          display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+          <input value={fRecherche} onChange={e => setFRecherche(e.target.value)}
+            placeholder="Rechercher un agent, un message, une adresse IP…"
+            style={{ flex: 1, minWidth: 200, padding: '8px 12px', background: T.bgInput,
+              border: `1px solid ${T.border}`, borderRadius: 6, color: T.text,
+              fontSize: 13, outline: 'none', fontFamily: T.body }} />
+
+          <select value={fNiveau} onChange={e => setFNiveau(e.target.value)}
+            style={{ padding: '8px 12px', background: T.bgInput, border: `1px solid ${T.border}`,
+              borderRadius: 6, color: T.text, fontSize: 12, outline: 'none', cursor: 'pointer' }}>
+            <option value="">Tous niveaux</option>
+            <option value="CRITIQUE">Critique</option>
+            <option value="ALERTE">Alerte</option>
+            <option value="INFO">Information</option>
+          </select>
+
+          <select value={fType} onChange={e => setFType(e.target.value)}
+            style={{ padding: '8px 12px', background: T.bgInput, border: `1px solid ${T.border}`,
+              borderRadius: 6, color: T.text, fontSize: 12, outline: 'none', cursor: 'pointer' }}>
+            <option value="">Tous types</option>
+            {typesPresents.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
+          </select>
+
+          <select value={fBase} onChange={e => setFBase(e.target.value)}
+            style={{ padding: '8px 12px', background: T.bgInput, border: `1px solid ${T.border}`,
+              borderRadius: 6, color: T.text, fontSize: 12, outline: 'none', cursor: 'pointer' }}>
+            <option value="">Toutes bases</option>
+            {BASES_FAC.map(b => <option key={b.id} value={b.id}>{b.code}</option>)}
+          </select>
+        </div>
+
         {loading ? (
           <div style={{ padding: 40, textAlign: 'center', color: T.textDim }}>Chargement…</div>
-        ) : alerts.length === 0 ? (
-          <div style={{ padding: 40, textAlign: 'center', color: T.textDim }}>Aucune alerte</div>
+        ) : alertesFiltrees.length === 0 ? (
+          <div style={{ padding: 40, textAlign: 'center', color: T.textDim }}>
+            {filtreActif ? 'Aucune alerte ne correspond aux filtres' : 'Aucune alerte'}
+          </div>
         ) : (
           <div style={{ maxHeight: 500, overflowY: 'auto' }}>
-            {alerts.map(a => (
+            {alertesFiltrees.map(a => (
               <div key={a.id} style={{ padding: '12px 20px', borderBottom: `1px solid ${T.border}`,
                 borderLeft: `3px solid ${niveauColor(a.niveau)}`,
                 background: a.niveau === 'CRITIQUE' ? T.redBg : 'transparent' }}>
