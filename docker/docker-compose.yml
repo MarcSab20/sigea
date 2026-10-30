@@ -85,7 +85,7 @@ services:
       REFERENTIEL_SERVICE_URL: http://referentiel-service:3002
       VOL_SERVICE_URL: http://vol-service:3003
       MANIFESTE_SERVICE_URL: http://manifeste-service:3004
-      VALIDATION_SERVICE_URL: http://validation-service:3005
+      LISTE_SERVICE_URL: http://liste-service:3009
       CEMAA_SERVICE_URL: http://cemaa-service:3006
       NOTIFICATION_SERVICE_URL: http://notification-service:3007
       PDF_SERVICE_URL: http://pdf-service:3008
@@ -171,16 +171,16 @@ services:
       postgres: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
 
-  validation-service:
+  liste-service:
     build:
       context: ..
       dockerfile: docker/Dockerfile.service
       args:
-        SERVICE: validation-service
-    container_name: sigea_validation
-    ports: ["3005:3005"]
+        SERVICE: liste-service
+    container_name: sigea_liste
+    ports: ["3009:3009"]
     environment:
-      PORT: 3005
+      PORT: 3009
       DATABASE_URL: postgresql://sigea_app:${DB_PASSWORD}@postgres:5432/sigea
       RABBITMQ_URL: amqp://sigea:${RABBITMQ_PASSWORD}@rabbitmq:5672
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
@@ -220,6 +220,7 @@ services:
       RABBITMQ_URL: amqp://sigea:${RABBITMQ_PASSWORD}@rabbitmq:5672
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
+      SMS_OPERATEUR_URL: ""
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
     depends_on:
       postgres: { condition: service_healthy }
