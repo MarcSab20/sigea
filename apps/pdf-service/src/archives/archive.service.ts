@@ -95,8 +95,8 @@ export class ArchiveService implements OnModuleInit {
     const m = await this.prisma.manifeste.findUnique({
       where: { id: manifeste_id },
       select: {
-        id: true, statut: true, base_id: true, vol_id: true, etape_vol: true,
-        version: true, updatedAt: true,
+        id: true, statut: true, base_id: true, vol_id: true, numero_manifeste: true,
+        version: true, definitif_le: true,updatedAt: true,
         vol: { select: { numero_mission: true } },
       },
     });
@@ -108,9 +108,9 @@ export class ArchiveService implements OnModuleInit {
     // On n'archive QUE du clos. Archiver un manifeste encore modifiable
     // produirait une pièce périmée dès le lendemain — pire qu'aucune pièce,
     // car elle inspirerait confiance.
-    if (m.statut !== StatutManifeste.VALIDE) {
+    if (m.statut !== StatutManifeste.DEFINITIF) {
       this.logger.warn(
-        `Archivage refusé : manifeste ${manifeste_id} au statut ${m.statut}, VALIDE attendu`,
+        `Archivage refusé : manifeste ${manifeste_id} au statut ${m.statut}, DEFINITIF attendu`,
       );
       return;
     }
@@ -164,7 +164,7 @@ export class ArchiveService implements OnModuleInit {
           base_id:         m.base_id,
           vol_id:          m.vol_id,
           numero_mission:  m.vol.numero_mission,
-          etape_vol:       m.etape_vol,
+          numero_manifeste: m.numero_manifeste,
           chemin:          relatif,
           taille_octets:   buffer.length,
           sha256_pdf,
@@ -220,7 +220,7 @@ export class ArchiveService implements OnModuleInit {
       this.prisma.archiveManifeste.findMany({
         where,
         select: {
-          id: true, manifeste_id: true, numero_mission: true, etape_vol: true,
+          id: true, manifeste_id: true, numero_mission: true, numero_manifeste: true,
           base_id: true, vol_id: true, taille_octets: true, statut: true,
           date_cloture: true, genere_le: true, nb_telechargements: true,
           version_contenu: true,
@@ -261,7 +261,7 @@ export class ArchiveService implements OnModuleInit {
     }
 
     const absolu = path.join(this.racine, a.chemin);
-    const fichier = `manifeste_${a.numero_mission}_${a.etape_vol}.pdf`;
+    const fichier = `manifeste_${a.numero_manifeste.replace(/\//g, '_')}.pdf`;
 
     // Compteur hors chemin critique : une écriture qui échoue ne doit jamais
     // empêcher un téléchargement.

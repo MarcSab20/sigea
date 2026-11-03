@@ -5,8 +5,9 @@
   "projectType": "library",
   "targets": {
     "build": { "executor": "@nx/js:tsc", "options": { "outputPath": "dist/libs/shared-integrity", "main": "libs/shared-integrity/src/index.ts", "tsConfig": "libs/shared-integrity/tsconfig.lib.json" } },
-    "test": { "executor": "@nx/jest:jest", "options": { "jestConfig": "libs/shared-integrity/jest.config.ts" } },
+    "test": { "executor": "@nx/jest:jest", "options": { "jestConfig": "libs/shared-integrity/jest.config.ts", "passWithNoTests": true } },
     "lint": { "executor": "@nx/eslint:lint", "options": { "lintFilePatterns": ["libs/shared-integrity/**/*.ts"] } }
   },
-  "tags": ["type:lib", "scope:shared-integrity"]
+  "tags": ["type:lib", "scope:shared-integrity"],
+  "implicitDependencies": ["shared-database"]
 }

@@ -286,34 +286,34 @@ export interface Etape {
 
 export const CIRCUIT: Etape[] = [
   {
-    rang: 1, role: "Chef d'escale", statut: 'VU',
-    titre: "Le manifeste est établi",
-    texte: "Passagers, matériels, équipage et marchandises dangereuses sont saisis une seule fois. Les totaux sont contrôlés à la saisie contre les capacités réelles de l'aéronef ; un dépassement bloque la soumission plutôt que de la signaler après coup.",
-    garde: "La soumission vaut visa : elle est horodatée et le contenu est figé.",
+    rang: 1, role: "Secrétaire de l'Adjoint Air", statut: 'VU',
+    titre: "La liste hiérarchisée est constituée",
+    texte: "Le secrétaire tient un vivier de demandeurs, indépendamment de tout vol. Dès que le sous-chef opérations alloue un quota, il y puise les noms qu'il porte sur la liste, répartis en six niveaux de priorité. Ceux qui dépassent le quota basculent en liste d'attente plutôt que d'être écartés.",
+    garde: "Il est le seul à inscrire. Toutes les autorités suivantes discriminent, aucune n'ajoute.",
   },
   {
-    rang: 2, role: 'COMESO', statut: 'VU',
-    titre: "L'escale contrôle la conformité",
-    texte: "Le commandement de l'escale vérifie la cohérence du document avec la réalité du terrain — créneaux, moyens de piste, conditions d'accueil — puis appose son visa.",
-    garde: "Un rejet renvoie le manifeste au chef d'escale, motif obligatoire.",
+    rang: 2, role: 'Adjoint Air', statut: 'VU',
+    titre: "L'Adjoint Air discrimine",
+    texte: "Il retire les voyageurs qu'il juge non conformes, révise les priorités et réordonne les tableaux. La liste d'attente lui est communiquée en même temps que la liste hiérarchisée : il peut y repêcher un nom dans la limite des places.",
+    garde: "Chaque décision exige un motif, conservé avec la ligne même après retrait.",
   },
   {
-    rang: 3, role: 'COMGMO', statut: 'VU',
-    titre: "Les moyens engagés sont vérifiés",
-    texte: "Le groupement de maintenance opérationnelle confronte le manifeste à l'aéronef réellement affecté et à son état de disponibilité.",
-    garde: "Un changement d'aéronef après ce visa rouvre le circuit à cette étape.",
+    rang: 3, role: 'Commandant de RMIA', statut: 'SIGNATURE',
+    titre: "La région militaire arrête sa position",
+    texte: "Dernière discrimination avant la base de décollage. Le commandant de la Région Militaire Interarmées statue sur les deux listes et appose sa signature numérique. Les données d'une RMIA ne sont accessibles à aucune autre.",
+    garde: "Chaque signature fige l'empreinte du contenu visé : ce qui a été signé reste prouvable.",
   },
   {
-    rang: 4, role: 'COMBASE', statut: 'ACCORD',
-    titre: "La base donne son accord",
-    texte: "Le commandant de base statue au titre du commandement. Pour un vol classé sensible, un verrou CEMAA s'interpose avant cet accord et ne peut être franchi par personne d'autre.",
-    garde: "Le commandant de base accorde, mais ne planifie pas — les deux prérogatives sont distinctes.",
+    rang: 4, role: 'Commandant de base', statut: 'ACCORD',
+    titre: "La base de décollage arrête la liste",
+    texte: "Il discrimine une dernière fois, puis arrête. Le manifeste est alors émis à partir des seuls noms retenus, et les voyageurs reçoivent par message leur heure de présentation. Il peut déléguer la discrimination au COMGMO ou au commandant en second ; la signature portée reste la sienne.",
+    garde: "L'escale n+1 ne peut être arrêtée qu'après l'escale n. L'ordre est strict.",
   },
   {
-    rang: 5, role: 'Commandant de bord', statut: 'CLOS',
+    rang: 5, role: 'Commandant de bord', statut: 'VISA',
     titre: "Le bord clôt le circuit",
-    texte: "Dernier visa avant vol. À sa pose, le manifeste devient définitif : le tirage papier porte alors un code de contrôle dont la lecture atteste que le document présenté correspond bien à cet état signé.",
-    garde: "Après clôture, toute modification crée une nouvelle version, jamais une réécriture.",
+    texte: "Il constate ce qui monte réellement à bord et retire, s'il y a lieu. Son visa est le seul que porte le manifeste, en pied de document. À sa pose, le document devient définitif et son code de contrôle atteste que le tirage présenté correspond à cet état signé.",
+    garde: "La liste d'attente ne lui est jamais communiquée : le manifeste ne porte que les retenus.",
   },
 ];
 

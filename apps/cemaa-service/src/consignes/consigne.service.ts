@@ -274,14 +274,14 @@ export class ConsigneService {
       where: { id: vol_id },
       select: {
         base_depart_id: true, base_arrivee_id: true,
-        escales: { select: { base_id: true } },
+        itineraire: { select: { base_id: true } },
       },
     });
     if (!vol) throw new NotFoundException(`Vol ${vol_id} introuvable`);
 
     const bases = new Set<string>([
       vol.base_depart_id, vol.base_arrivee_id,
-      ...vol.escales.map((e) => e.base_id),
+      ...vol.itineraire.map((e) => e.base_id),
     ]);
     if (!bases.has(base_id)) {
       throw new BadRequestException(`La base ${base_id} n'est pas sur la route du vol`);

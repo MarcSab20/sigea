@@ -112,7 +112,7 @@ export class ListesService {
   }
 
   /** La liste doit être ouverte à la saisie. */
-  private exigerSaisissable(liste: { statut: StatutListe; etape_courante: EtapeListe | null }): void {
+  private exigerSaisissable(liste: { statut: string; etape_courante: string | null }): void {
     const ouverte =
       (liste.statut === StatutListe.OUVERTE || liste.statut === StatutListe.REJETEE) &&
       liste.etape_courante === EtapeListe.SEC_ADJ_AIR;
@@ -839,7 +839,7 @@ export class ListesService {
 
   /** Étape que l'utilisateur est habilité à franchir sur cette liste, maintenant. */
   private exigerSonTour(
-    liste: { statut: StatutListe; etape_courante: EtapeListe | null },
+    liste: { statut: string; etape_courante: string | null },
     user: JwtPayload,
   ): EtapeListe {
     const etape = liste.etape_courante as EtapeListe | null;

@@ -296,7 +296,7 @@ export class VolsService {
           },
           orderBy: { ordre: 'asc' },
         },
-        manifestes: { select: { id: true, statut: true, base_id: true, etape_courante: true } },
+        manifestes: { select: { id: true, statut: true, base_id: true, numero_manifeste: true } },
       },
     });
     if (!vol) throw new NotFoundException(`Vol ${id} introuvable ou hors de votre périmètre`);

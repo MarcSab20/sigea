@@ -125,7 +125,6 @@ export class NumeroControleService implements OnModuleInit {
           code_hash:    this.empreinte(code),
           code_chiffre: JSON.stringify(this.crypto.encrypt(code, this.cle)),
           suffixe,
-          genere_etape: etape ?? null,
         },
       });
       this.logger.log(`Numéro de contrôle émis : manifeste=${manifeste_id} suffixe=${suffixe}`);
@@ -265,7 +264,7 @@ export class NumeroControleService implements OnModuleInit {
       include: {
         manifeste: {
           select: {
-            id: true, statut: true, etape_courante: true, etape_vol: true,
+            id: true, statut: true, numero_manifeste: true,
             version: true, flag_sensible: true, createdAt: true,
             base: { select: { code_base: true, nom: true } },
             vol:  { select: { numero_mission: true, date_heure: true, immatriculation: true } },

@@ -307,23 +307,13 @@ model Utilisateur {
   login         String          @unique
   password_hash String
   role          RoleUtilisateur
-
-  /// Base d'affectation administrative. Ne commande PAS le périmètre des rôles
-  /// RMIA ni des rôles nationaux — voir `rmia` et `perimetreDeRole()`.
   base_id String
   base    Base   @relation(fields: [base_id], references: [id])
-
-  /// OBLIGATOIRE pour comrmia / adj_air / sec_adj_air, NULLE ailleurs.
-  /// Seul ce champ interdit à l'Adjoint Air de la RMIA 2 de voir les listes
-  /// de la RMIA 4.
   rmia Rmia?
-
   escadron_id String?
   escadron    Escadron? @relation(fields: [escadron_id], references: [id])
-
   base_admin Base[]  @relation("BaseAdmin")
   actif      Boolean @default(true)
-
   vols_combord       Vol[]                  @relation("VolCombord")
   sessions           Session[]
   visas              VisaListe[]            @relation("VisaSignataire")
@@ -437,7 +427,7 @@ model Vol {
   itineraire      EtapeItineraire[]
   listes          ListeEmbarquement[]
   manifestes      Manifeste[]
-  consignes       ConsigneAutorite[]
+  consignes       ConsigneCemaa[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -955,22 +945,21 @@ model ManifesteSnapshot {
 ///
 /// Dans les deux cas, le visa du COMBORD reste bloqué tant que l'autorité
 /// émettrice n'a pas attesté de l'exécution.
-model ConsigneAutorite {
+model ConsigneCemaa {
   id             String  @id @default(uuid())
   vol_id         String
   vol            Vol     @relation(fields: [vol_id], references: [id], onDelete: Cascade)
-  /// Étape d'itinéraire visée. NULL = le vol entier.
-  etape_id       String?
+  /// Base de l'escale visée. NULL = le vol entier.
+  escale_base_id String?
 
-  type            TypeConsigne
-  autorite        AutoriteCentrale @default(CEMAA)
+  type             TypeConsigne
+  autorite         AutoriteCentrale @default(CEMAA)
   /// Contenu chiffré (CemaaCryptoService). Jamais stocké en clair.
-  contenu_chiffre String
-
+  contenu_chiffre  String
   places_bloquees  Int     @default(0)
   masse_bloquee_kg Decimal @default(0) @db.Decimal(10, 2)
 
-  emise_par String
+  valide_par_cemaa String
 
   statut_realisation      StatutConsigne @default(EMISE)
   confirme_par            String?
@@ -981,7 +970,7 @@ model ConsigneAutorite {
   updatedAt DateTime @updatedAt
 
   @@index([vol_id, statut_realisation])
-  @@index([vol_id, etape_id])
+  @@index([vol_id, escale_base_id])
   @@index([autorite, vol_id])
 }
 
@@ -1179,6 +1168,7 @@ model ArchiveManifeste {
   base_id        String
   vol_id         String
   numero_mission String
+  numero_manifeste String
 
   /// Chemin RELATIF à ARCHIVE_ROOT : déplacer le volume ne doit pas invalider
   /// la base.

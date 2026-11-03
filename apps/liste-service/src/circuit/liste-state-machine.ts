@@ -534,11 +534,11 @@ export class ListeStateMachine {
     }
   }
 
-  private consignesNonConfirmees(vol_id: string, etape_id: string) {
-    return this.prisma.consigneAutorite.findMany({
+    private consignesNonConfirmees(vol_id: string, base_id: string) {
+    return this.prisma.consigneCemaa.findMany({
       where: {
         vol_id,
-        OR: [{ etape_id: null }, { etape_id }],
+        OR: [{ escale_base_id: null }, { escale_base_id: base_id }],
         statut_realisation: { in: [StatutConsigne.EMISE, StatutConsigne.NON_REALISEE] },
       },
       select: {

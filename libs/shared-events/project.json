@@ -8,5 +8,6 @@
     "test": { "executor": "@nx/jest:jest", "options": { "jestConfig": "libs/shared-events/jest.config.ts" } },
     "lint": { "executor": "@nx/eslint:lint", "options": { "lintFilePatterns": ["libs/shared-events/**/*.ts"] } }
   },
-  "tags": ["type:lib", "scope:shared-events"]
+  "tags": ["type:lib", "scope:shared-events"],
+  "implicitDependencies": ["shared-types"]
 }

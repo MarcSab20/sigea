@@ -3,7 +3,7 @@ import {
   Injectable, BadRequestException, ConflictException, NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '@sigea/shared-database';
-import { RoleUtilisateur, ROLES_AVEC_ESCADRON } from '@sigea/shared-types';
+import { RoleUtilisateur, ROLES_AVEC_ESCADRON, rmiaDeRegionStrict } from '@sigea/shared-types';
 import * as bcrypt from 'bcryptjs';
 import { CreateUtilisateurDto } from './dto/create-utilisateur.dto';
 import { UpdateUtilisateurDto } from './dto/update-utilisateur.dto';
@@ -182,7 +182,12 @@ export class AdminService {
     try {
       const numero = dto.numero ?? (dto.code_base.replace(/\D/g, '') || dto.code_base);
       return await this.prisma.base.create({
-        data: { code_base: dto.code_base, numero, nom: dto.nom, region: dto.region },
+        data: {
+          code_base: dto.code_base, numero, nom: dto.nom, region: dto.region,
+          // Dérivée de la région, jamais saisie : deux champs indépendants
+          // finiraient par diverger, et c'est le cloisonnement qui en pâtirait.
+          rmia: rmiaDeRegionStrict(dto.region),
+        },
       });
     } catch (e: unknown) {
       if ((e as { code?: string }).code === 'P2002') {
@@ -197,7 +202,10 @@ export class AdminService {
     if (!existing) throw new NotFoundException('Base introuvable');
     return this.prisma.base.update({
       where: { id },
-      data: { nom: dto.nom, region: dto.region }, // code_base non modifiable
+      data: {
+        nom: dto.nom,
+        ...(dto.region ? { region: dto.region, rmia: rmiaDeRegionStrict(dto.region) } : {}),
+      }, // code_base non modifiable
     });
   }
 

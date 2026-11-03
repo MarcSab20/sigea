@@ -232,3 +232,15 @@ export enum NiveauConfidentialite {
   CONFIDENTIEL_DEFENSE = 'CONFIDENTIEL_DEFENSE',
   SENSIBLE_CEMAA       = 'SENSIBLE_CEMAA',
 }
+
+/** Types de notification interne. Doit refléter l'enum PostgreSQL. */
+export enum TypeNotification {
+  VOL_DIFFUSE         = 'VOL_DIFFUSE',
+  LISTE_A_TRAITER     = 'LISTE_A_TRAITER',
+  LISTE_VISEE         = 'LISTE_VISEE',
+  LISTE_REJETEE       = 'LISTE_REJETEE',
+  LISTE_ARRETEE       = 'LISTE_ARRETEE',
+  MANIFESTE_DEFINITIF = 'MANIFESTE_DEFINITIF',
+  CONSIGNE_AUTORITE   = 'CONSIGNE_AUTORITE',
+  ALERTE              = 'ALERTE',
+}

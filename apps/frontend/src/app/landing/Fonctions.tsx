@@ -115,7 +115,7 @@ const PARCOURS = [
   { at: 4, rejet: false },
 ];
 
-const NIVEAUX = ["Chef d'escale", 'COMESO', 'COMGMO', 'COMBASE', 'Cdt de bord'];
+const NIVEAUX = ['Sec. Adj. Air', 'Adjoint Air', 'COMRMIA', 'COMBASE', 'Cdt de bord'];
 
 function DemoCircuit({ actif }: { actif: boolean }): React.ReactElement {
   const i = useBoucle(PARCOURS.length, 950, actif);
