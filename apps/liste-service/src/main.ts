@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { configurerOpenApi } from '@sigea/shared-openapi';
 import { ListeServiceModule } from './liste-service.module';
+import { json } from 'express';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(ListeServiceModule);
@@ -20,6 +21,8 @@ async function bootstrap(): Promise<void> {
   });
 
   const port = process.env.PORT ?? 3009;
+  
+  app.use(json({ limit: '12mb' }));
   await app.listen(port);
   logger.log(`Liste Service SIGEA running on port ${port}`);
 }

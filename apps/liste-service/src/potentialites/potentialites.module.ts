@@ -2,9 +2,11 @@
 import { Module } from '@nestjs/common';
 import { PotentialitesController } from './potentialites.controller';
 import { PotentialitesService } from './potentialites.service';
+import { PiecesService } from './pieces.service';
 
 @Module({
   controllers: [PotentialitesController],
-  providers: [PotentialitesService],
+  providers: [PotentialitesService, PiecesService],
+  exports: [PiecesService],
 })
 export class PotentialitesModule {}

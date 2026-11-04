@@ -4,27 +4,27 @@
 // notification persistée puis diffusée.
 //
 // ═══════════════════════════════════════════════════════════════════════════
-// CE QUI CHANGE
+// CE QUI CHANGE DANS CETTE VERSION
 // ═══════════════════════════════════════════════════════════════════════════
-// Les évènements MANIFESTE_* ont disparu avec le circuit qu'ils décrivaient.
-// Les nouveaux portent sur le VOL (planification, diffusion) et sur la LISTE
-// (ouverture, visa, renvoi, arrêté, clôture).
 //
-// La portée change aussi, et c'est le point important : la plupart de ces
-// évènements s'adressent à une RÉGION, pas à une base. Une liste ouverte à
-// Douala concerne la RMIA 2 tout entière — le secrétaire qui la remplira n'est
-// pas nécessairement affecté à la base de Douala.
+// 1. À LA DIFFUSION, ON COMPTE LES CANDIDATS DU VIVIER.
+//    « Un vol est diffusé » n'est pas actionnable ; « vous avez douze
+//    demandeurs qui attendaient ce jour-là » l'est. Sans ce décompte, le
+//    secrétaire doit ouvrir l'écran pour savoir s'il a quelque chose à faire,
+//    et finit par ne plus ouvrir les notifications du tout.
 //
-// Enfin, chaque notification nomme l'action attendue plutôt que l'évènement
-// survenu : « Liste à constituer » est un ordre, « liste ouverte » est un
-// constat. Devant vingt lignes, la différence décide si l'on clique ou non.
+// 2. LES MAILLONS DÉJÀ PASSÉS SONT INFORMÉS DES DÉCISIONS AVAL.
+//    La directive veut qu'ils suivent la suite « à titre informatif, sans
+//    pouvoir réagir ». Une notification sans destinataire nommé, sur la room
+//    RMIA, et dont le titre dit explicitement qu'aucune action n'est attendue.
 
 import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
 import * as amqp from 'amqplib';
 import { VOL_EVENTS, LISTE_EVENTS, CEMAA_EVENTS, ALERT_EVENTS } from '@sigea/shared-events';
 import { SIGEA_EXCHANGE, NOTIFICATION_QUEUE } from '@sigea/shared-messaging';
 import {
-  TypeNotification, Rmia, EtapeListe, LIBELLE_ETAPE_LISTE, LIBELLE_RMIA,
+  TypeNotification, Rmia, EtapeListe,
+  LIBELLE_ETAPE_LISTE, rangEtapeListe,
 } from '@sigea/shared-types';
 import { PrismaService } from '@sigea/shared-database';
 import { NotificationGateway } from '../gateway/notification.gateway';
@@ -75,7 +75,8 @@ export class EventsConsumer implements OnModuleInit, OnModuleDestroy {
       await this.channel?.close();
       await this.connection?.close();
     } catch {
-      // Fermeture best-effort.
+      // Fermeture best-effort : un conteneur qui s'arrête n'a pas à échouer
+      // parce qu'une socket était déjà tombée.
     }
   }
 
@@ -163,15 +164,44 @@ export class EventsConsumer implements OnModuleInit, OnModuleDestroy {
 
       // ── Diffusion : chaque RMIA touchée reçoit sa liste à constituer ──
       case VOL_EVENTS.VOL_DIFFUSE: {
-        for (const l of p.listes ?? []) {
+        if (!p.listes?.length) break;
+
+        // La date du vol est lue UNE FOIS, hors de la boucle : elle est la même
+        // pour toutes les escales, et l'interroger par liste multiplierait les
+        // requêtes sans rien changer au résultat.
+        const vol = p.vol_id
+          ? await this.prisma.vol.findUnique({
+              where: { id: p.vol_id },
+              select: { date_heure: true },
+            })
+          : null;
+
+        const bornes = vol ? this.journeeDe(vol.date_heure) : null;
+
+        for (const l of p.listes) {
+          // Nombre de candidats du vivier ayant demandé CE jour, dans CETTE
+          // région. C'est l'information qui transforme une notification
+          // d'évènement en consigne de travail.
+          const candidats = bornes
+            ? await this.prisma.potentialite.count({
+                where: {
+                  rmia: l.rmia,
+                  statut: 'DISPONIBLE',
+                  date_vol_souhaitee: { gte: bornes.debut, lte: bornes.fin },
+                },
+              })
+            : 0;
+
           await this.notifications.emettre({
             base_id: l.base_id,
             rmia:    l.rmia,
             type:    TypeNotification.LISTE_A_TRAITER,
             titre:   'Liste à constituer',
             message:
-              `Vol ${p.numero_mission ?? ''} — quotas alloués pour l'escale ${l.ordre}. ` +
-              `Le secrétaire de l'Adjoint Air peut constituer la liste hiérarchisée.`,
+              `Vol ${p.numero_mission ?? ''} — quotas alloués pour l'escale ${l.ordre}` +
+              (candidats
+                ? `. ${candidats} demandeur(s) de votre vivier attendaient ce jour.`
+                : `. Aucun demandeur du vivier n'avait demandé cette date.`),
             vol_id:   p.vol_id,
             liste_id: l.liste_id,
             etape:    EtapeListe.SEC_ADJ_AIR,
@@ -203,35 +233,61 @@ export class EventsConsumer implements OnModuleInit, OnModuleDestroy {
         break;
       }
 
-      // ── Visa apposé : prévenir l'étape suivante ──
+      // ── Visa apposé : prévenir l'étape suivante, informer les précédentes ──
       case LISTE_EVENTS.LISTE_VISEE: {
         if (!p.liste_id || !p.etape) break;
-        const suivante = p.etape_suivante;
-        if (!suivante) break;
 
         const liste = await this.chargerListe(p.liste_id);
         if (!liste) break;
 
-        // Les étapes COMBASE et COMBORD sortent du périmètre RMIA : la
-        // première s'adresse à la base de décollage, la seconde à une personne
-        // nommée. Les diffuser à la région serait au mieux du bruit, au pire
-        // une fuite d'information vers des officiers non concernés.
-        const versBase = suivante === EtapeListe.COMBASE || suivante === EtapeListe.COMBORD;
+        const suivante = p.etape_suivante;
 
-        await this.notifications.emettre({
-          base_id: liste.base_id,
-          rmia:    versBase ? null : (liste.rmia as Rmia),
-          destinataire_id:
-            suivante === EtapeListe.COMBORD ? liste.combord_id ?? null : null,
-          type:  TypeNotification.LISTE_A_TRAITER,
-          titre: `À viser — ${LIBELLE_ETAPE_LISTE[suivante]}`,
-          message:
-            `Vol ${liste.numero_mission}, escale ${liste.ordre} : la liste a été visée par ` +
-            `${LIBELLE_ETAPE_LISTE[p.etape]}. Elle attend votre discrimination.`,
-          vol_id:   liste.vol_id,
-          liste_id: p.liste_id,
-          etape:    suivante,
-        });
+        if (suivante) {
+          // Les étapes COMBASE et COMBORD sortent du périmètre RMIA : la
+          // première s'adresse à la base de décollage, la seconde à une
+          // personne nommée. Les diffuser à la région serait au mieux du bruit,
+          // au pire une fuite vers des officiers non concernés.
+          const versBase = suivante === EtapeListe.COMBASE || suivante === EtapeListe.COMBORD;
+
+          await this.notifications.emettre({
+            base_id: liste.base_id,
+            rmia:    versBase ? null : (liste.rmia as Rmia),
+            destinataire_id:
+              suivante === EtapeListe.COMBORD ? liste.combord_id ?? null : null,
+            type:  TypeNotification.LISTE_A_TRAITER,
+            titre: `À viser — ${LIBELLE_ETAPE_LISTE[suivante]}`,
+            message:
+              `Vol ${liste.numero_mission}, escale ${liste.ordre} : la liste a été visée par ` +
+              `${LIBELLE_ETAPE_LISTE[p.etape]}. Elle attend votre discrimination.`,
+            vol_id:   liste.vol_id,
+            liste_id: p.liste_id,
+            etape:    suivante,
+          });
+        }
+
+        // ── Information des maillons déjà passés ──
+        //
+        // Sans destinataire nommé et sur la room RMIA : ils ne peuvent plus
+        // agir, mais doivent savoir ce qu'est devenue la liste qu'ils ont
+        // visée. Le titre dit la décision, le message dit qu'aucune action
+        // n'est attendue — sans quoi la notification serait lue comme une
+        // convocation.
+        //
+        // La condition écarte la première étape : quand le secrétaire vise, il
+        // n'y a personne en amont à informer.
+        if (rangEtapeListe(p.etape) > 1) {
+          await this.notifications.emettre({
+            base_id: liste.base_id,
+            rmia:    liste.rmia as Rmia,
+            type:    TypeNotification.LISTE_VISEE,
+            titre:   `Liste visée par ${LIBELLE_ETAPE_LISTE[p.etape]}`,
+            message:
+              `Vol ${liste.numero_mission}, escale ${liste.ordre} : décision prise ` +
+              `à l'étape ${LIBELLE_ETAPE_LISTE[p.etape]}. Information, sans action attendue.`,
+            vol_id:   liste.vol_id,
+            liste_id: p.liste_id,
+          });
+        }
         break;
       }
 
@@ -346,8 +402,8 @@ export class EventsConsumer implements OnModuleInit, OnModuleDestroy {
       //
       // Diffusées à TOUS les clients connectés, sans persistance : une
       // marchandise dangereuse ou une évacuation sanitaire concerne quiconque
-      // se trouve sur le trajet. Les persister par base produirait des centaines
-      // de lignes pour un évènement unique.
+      // se trouve sur le trajet. Les persister par base produirait des
+      // centaines de lignes pour un évènement unique.
       case ALERT_EVENTS.EVASAN:
       case ALERT_EVENTS.VIP:
       case ALERT_EVENTS.DANGEROUS_GOODS: {
@@ -361,6 +417,22 @@ export class EventsConsumer implements OnModuleInit, OnModuleDestroy {
         // journaux sous le trafic normal.
         break;
     }
+  }
+
+  /**
+   * Bornes de la journée d'un vol, dans le fuseau du serveur.
+   *
+   * On construit DEUX dates à partir de l'originale au lieu de muter la même :
+   * `setHours` modifie l'objet en place, et réutiliser la même instance pour le
+   * début puis la fin donnerait deux fois la fin. C'est une erreur classique,
+   * silencieuse, et qui ferait ici remonter zéro candidat.
+   */
+  private journeeDe(date: Date): { debut: Date; fin: Date } {
+    const debut = new Date(date);
+    debut.setHours(0, 0, 0, 0);
+    const fin = new Date(date);
+    fin.setHours(23, 59, 59, 999);
+    return { debut, fin };
   }
 
   /** Contexte minimal d'une liste, pour composer un message lisible. */
@@ -385,10 +457,5 @@ export class EventsConsumer implements OnModuleInit, OnModuleDestroy {
       rmia: String(l.rmia),
       combord_id: l.vol.combord_id,
     };
-  }
-
-  /** Libellé d'une RMIA, pour les messages adressés à une région entière. */
-  private libelleRmia(rmia: Rmia | undefined): string {
-    return rmia ? LIBELLE_RMIA[rmia] ?? String(rmia) : '';
   }
 }

@@ -93,7 +93,7 @@ const VILLE_RMIA: Record<Rmia, string> = {
 interface CompteSeed {
   login: string;
   role: RoleUtilisateur;
-  base_id: string;
+  base_id: string | null;
   rmia?: Rmia | null;
   nom: string;
   prenom: string;
@@ -107,19 +107,18 @@ interface CompteSeed {
  */
 function comptesRmia(rmia: Rmia): CompteSeed[] {
   const ville = VILLE_RMIA[rmia];
-  const base = SIEGE_RMIA[rmia];
   const n = rmia.slice(-1);
   return [
     {
-      login: `comrmia.${ville}`, role: RoleUtilisateur.comrmia, base_id: base, rmia,
+      login: `comrmia.${ville}`, role: RoleUtilisateur.comrmia, base_id: null, rmia,
       nom: `Commandant${n}`, prenom: 'Région', grade: 'Général de Brigade',
     },
     {
-      login: `adjair.${ville}`, role: RoleUtilisateur.adj_air, base_id: base, rmia,
+      login: `adjair.${ville}`, role: RoleUtilisateur.adj_air, base_id: null, rmia,
       nom: `Adjoint${n}`, prenom: 'Air', grade: 'Colonel',
     },
     {
-      login: `secadjair.${ville}`, role: RoleUtilisateur.sec_adj_air, base_id: base, rmia,
+      login: `secadjair.${ville}`, role: RoleUtilisateur.sec_adj_air, base_id: null, rmia,
       nom: `Secretaire${n}`, prenom: 'Adjoint', grade: 'Adjudant-Chef',
     },
   ];
@@ -240,12 +239,12 @@ async function main(): Promise<void> {
   for (const c of comptes) {
     await prisma.utilisateur.upsert({
       where: { login: c.login },
-      // `rmia` figure dans l'update : un compte créé avant l'introduction du
-      // cloisonnement régional doit être rattaché au prochain passage, sans
-      // quoi son titulaire resterait devant un écran vide sans comprendre.
-      update: { base_id: c.base_id, role: c.role, rmia: c.rmia ?? null, actif: true },
+      update: {
+        base_id: c.base_id || null, role: c.role, rmia: c.rmia ?? null, actif: true,
+      },
       create: {
-        login: c.login, role: c.role, base_id: c.base_id, rmia: c.rmia ?? null,
+        login: c.login, role: c.role,
+        base_id: c.base_id || null, rmia: c.rmia ?? null,
         nom: c.nom, prenom: c.prenom, grade: c.grade,
         telephone: c.telephone ?? null,
         password_hash,

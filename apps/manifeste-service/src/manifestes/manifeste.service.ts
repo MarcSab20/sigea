@@ -56,7 +56,7 @@ export class ManifesteService {
     const clauses: Prisma.ManifesteWhereInput[] = [];
     const rmias = rmiasCouvertes(user);
     if (rmias.length) clauses.push({ liste: { rmia: { in: rmias } } });
-    if (roles.some((r) => r === RoleUtilisateur.COMBASE || ROLES_DELEGATAIRES_COMBASE.includes(r))) {
+    if (user.base_id && roles.some((r) => r === RoleUtilisateur.COMBASE || ROLES_DELEGATAIRES_COMBASE.includes(r))) {
       clauses.push({ base_id: user.base_id });
     }
     if (roles.includes(RoleUtilisateur.COMBORD)) {

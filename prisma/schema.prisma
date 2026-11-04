@@ -236,15 +236,9 @@ model Base {
   numero    String
   nom       String
   region    String
-
-  /// RMIA de rattachement. STOCKÉE et non dérivée de `region` à la lecture :
-  /// elle porte le cloisonnement, et un cloisonnement ne doit pas dépendre
-  /// d'une chaîne saisie à la main.
   rmia Rmia
-
   admin_id       String?
   administrateur Utilisateur? @relation("BaseAdmin", fields: [admin_id], references: [id])
-
   utilisateurs      Utilisateur[]
   manifestes        Manifeste[]
   vols_depart       Vol[]             @relation("VolDepart")
@@ -252,7 +246,8 @@ model Base {
   etapes_itineraire EtapeItineraire[] @relation("EtapeBase")
   escadrons         Escadron[]
   notifications     Notification[]
-  potentialites     Potentialite[]
+    potentialites_depart  Potentialite[] @relation("PotentialiteDepart")
+  potentialites_arrivee Potentialite[] @relation("PotentialiteArrivee")
   createdAt         DateTime          @default(now())
 
   @@index([rmia])
@@ -307,8 +302,8 @@ model Utilisateur {
   login         String          @unique
   password_hash String
   role          RoleUtilisateur
-  base_id String
-  base    Base   @relation(fields: [base_id], references: [id])
+  base_id String?
+  base    Base?   @relation(fields: [base_id], references: [id])
   rmia Rmia?
   escadron_id String?
   escadron    Escadron? @relation(fields: [escadron_id], references: [id])
@@ -341,7 +336,7 @@ model Utilisateur {
   interims_suppleant Interim[]              @relation("InterimSuppleant")
   mouvements         MouvementPersonnel[]   @relation("MouvementConcerne")
   successions        MouvementPersonnel[]   @relation("MouvementSuccesseur")
-
+  listes_deleguees ListeEmbarquement[] @relation("ListeDelegataire")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -486,10 +481,13 @@ model EtapeItineraire {
 /// Voyageur potentiel, enregistré hors de tout vol.
 /// Un enregistrement n'emporte AUCUN droit à embarquer.
 model Potentialite {
-  id      String @id @default(uuid())
-  rmia    Rmia
-  base_id String
-  base    Base   @relation(fields: [base_id], references: [id])
+  id   String @id @default(uuid())
+  rmia Rmia
+  date_vol_souhaitee DateTime?
+  base_depart_id     String?
+  base_depart        Base?     @relation("PotentialiteDepart", fields: [base_depart_id], references: [id])
+  base_arrivee_id    String?
+  base_arrivee       Base?     @relation("PotentialiteArrivee", fields: [base_arrivee_id], references: [id])
 
   nom       String
   prenom    String
@@ -499,14 +497,10 @@ model Potentialite {
   unite     String?
   telephone String
   categorie CategoriePassager
-
-  /// Priorité proposée. Indicative : l'ADJ_AIR et le COMRMIA la révisent sur
-  /// la liste, sans modifier la potentialité.
   priorite_proposee Priorite @default(P4)
 
-  destination_souhaitee String?
-  motif                 String?
-  ref_autorisation      String?
+  motif            String?
+  ref_autorisation String?
 
   nb_bagages       Int     @default(0)
   masse_bagages_kg Decimal @default(0) @db.Decimal(7, 2)
@@ -517,19 +511,47 @@ model Potentialite {
 
   statut         StatutPotentialite @default(DISPONIBLE)
   enregistre_par String
-  /// Péremption du vivier : un demandeur de l'an dernier n'est pas un candidat.
   valable_jusqu_au DateTime?
 
   lignes LigneListe[]
+  pieces PieceJointe[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([rmia, statut])
-  @@index([base_id, statut])
+  @@index([rmia, statut, date_vol_souhaitee])
+  @@index([base_depart_id, base_arrivee_id])
   @@index([nom, prenom])
   @@index([matricule])
   @@index([cni])
+}
+
+model PieceJointe {
+  id              String       @id @default(uuid())
+  potentialite_id String
+  potentialite    Potentialite @relation(fields: [potentialite_id], references: [id], onDelete: Cascade)
+
+  nature        NaturePiece
+  nom_fichier   String
+  type_mime     String
+  taille_octets Int
+  chemin        String
+  sha256        String
+
+  depose_par String
+  createdAt  DateTime @default(now())
+
+  @@index([potentialite_id])
+  @@index([sha256])
+}
+
+enum NaturePiece {
+  ORDRE_MISSION
+  TITRE_PERMISSION
+  PIECE_IDENTITE
+  CERTIFICAT_MEDICAL
+  AUTORISATION
+  AUTRE
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -542,25 +564,20 @@ model ListeEmbarquement {
   id     String @id @default(uuid())
   vol_id String
   vol    Vol    @relation(fields: [vol_id], references: [id], onDelete: Cascade)
-
   etape_id String
   etape    EtapeItineraire @relation(fields: [etape_id], references: [id], onDelete: Cascade)
-
   rmia Rmia
-
   statut         StatutListe @default(OUVERTE)
   etape_courante EtapeListe? @default(SEC_ADJ_AIR)
   version        Int         @default(1)
-
-  /// Quota opposable, RECOPIÉ de l'étape à l'ouverture. Une jointure donnerait
-  /// la valeur courante : un réajustement du SCOPS changerait alors la capacité
-  /// d'une liste déjà visée, sous les pieds de ses signataires.
   quota_places   Int
   quota_masse_kg Decimal @db.Decimal(10, 2)
-
-  /// Motif du dernier renvoi en arrière. Effacé au visa suivant.
   motif_rejet String?
-
+  delegue_a_id    String?
+  delegue_a       Utilisateur? @relation("ListeDelegataire", fields: [delegue_a_id], references: [id])
+  delegue_par     String?
+  delegue_le      DateTime?
+  motif_delegation String?
   lignes    LigneListe[]
   frets     FretListe[]
   visas     VisaListe[]
@@ -574,6 +591,7 @@ model ListeEmbarquement {
   @@unique([vol_id, etape_id])
   @@index([rmia, statut])
   @@index([etape_courante])
+  @@index([delegue_a_id])
 }
 
 /// Une ligne de liste : un voyageur, sa priorité, son rang, son trajet.
@@ -987,7 +1005,7 @@ model Interim {
   suppleant    Utilisateur @relation("InterimSuppleant", fields: [suppleant_id], references: [id])
 
   role_delegue RoleUtilisateur
-  base_id      String
+  base_id      String?
   /// RMIA de la délégation, pour les rôles de la chaîne RMIA. Une délégation ne
   /// franchit jamais une frontière de périmètre.
   rmia         Rmia?
@@ -1134,8 +1152,8 @@ model MfaResetRequest {
 
 model Notification {
   id              String       @id @default(uuid())
-  base_id         String
-  base            Base         @relation(fields: [base_id], references: [id], onDelete: Cascade)
+  base_id String?
+  base    Base?   @relation(fields: [base_id], references: [id], onDelete: Cascade)
   destinataire_id String?
   destinataire    Utilisateur? @relation(fields: [destinataire_id], references: [id], onDelete: Cascade)
 

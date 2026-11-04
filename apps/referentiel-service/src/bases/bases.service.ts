@@ -6,6 +6,9 @@ export class BasesService {
   constructor(private readonly prisma: PrismaService) {}
 
   findAll(): Promise<unknown[]> {
-    return this.prisma.base.findMany({ orderBy: { code_base: 'asc' } });
+    return this.prisma.base.findMany({
+      orderBy: { code_base: 'asc' },
+      select: { id: true, code_base: true, numero: true, nom: true, region: true, rmia: true },
+    });
   }
 }

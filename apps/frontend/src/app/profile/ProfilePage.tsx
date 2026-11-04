@@ -4,7 +4,7 @@ import { T } from '@/lib/theme';
 import { toast } from 'sonner';
 
 interface Profile {
-  nom: string; prenom: string; grade: string; login: string; role: string; base_id: string;
+  nom: string; prenom: string; grade: string; login: string; role: string; base_id: string | null; rmia?: string | null;
   email?: string; mfa_enrolled: boolean; last_login_at?: string; last_login_ip?: string;
   notif_connexion: boolean; notif_par_email: boolean;
   backup_codes_restants: number; notifs_non_lues: number;
@@ -80,7 +80,7 @@ export default function ProfilePage(): React.ReactElement {
           <Row l="Nom" v={`${p.grade} ${p.nom} ${p.prenom}`} />
           <Row l="Identifiant" v={p.login} />
           <Row l="Rôle" v={p.role.replace('_', ' ')} />
-          <Row l="Base" v={p.base_id.toUpperCase()} />
+          <Row l={p.base_id ? 'Base' : 'Région militaire'} v={p.base_id?.toUpperCase() ?? (p.rmia ? p.rmia.replace('_', ' ') : '—')} />
           <Row l="Dernière connexion" v={p.last_login_at ? new Date(p.last_login_at).toLocaleString('fr-FR') : '—'} />
           <Row l="Dernière IP" v={p.last_login_ip ?? '—'} />
           <div style={{ marginTop: 12, padding: '8px 12px', background: T.bgAlt, borderRadius: 6,

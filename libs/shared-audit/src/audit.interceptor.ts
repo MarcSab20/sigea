@@ -87,7 +87,7 @@ export class AuditInterceptor implements NestInterceptor {
         void this.audit
           .log({
             user_id: user.sub,
-            base_id: user.base_id,
+            base_id: user.base_id ?? (user.rmia ? `RMIA:${user.rmia}` : 'none'),
             role: user.role,
             action,
             resource: resource ?? chemin,

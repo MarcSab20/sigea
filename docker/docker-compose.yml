@@ -184,6 +184,9 @@ services:
       DATABASE_URL: postgresql://sigea_app:${DB_PASSWORD}@postgres:5432/sigea
       RABBITMQ_URL: amqp://sigea:${RABBITMQ_PASSWORD}@rabbitmq:5672
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
+      PIECES_ROOT: /data/pieces
+    volumes:
+      - sigea_pieces:/data/pieces
     depends_on:
       postgres: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
@@ -266,3 +269,4 @@ volumes:
   redisdata:  { driver: local }
   rabbitmqdata: { driver: local }
   archives:     { driver: local }
+  sigea_pieces:  {driver: local}

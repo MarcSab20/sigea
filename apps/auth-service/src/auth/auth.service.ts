@@ -2,7 +2,7 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '@sigea/shared-database';
-import { RoleUtilisateur, DelegationJwt } from '@sigea/shared-types';
+import { RoleUtilisateur, Rmia, DelegationJwt } from '@sigea/shared-types';
 import { OtpService } from '../otp/otp.service';
 import { BackupCodeService } from '../backup/backup-code.service';
 import { SecurityService, LoginContext } from '../security/security.service';
@@ -22,12 +22,36 @@ export interface LoginResult {
   access_token?: string;
   refresh_token?: string;
   user?: {
-    id: string; role: string; base_id: string;
+    id: string; role: string;
+    /** NULLE pour la chaîne RMIA, qui relève d'une région et non d'une base. */
+    base_id: string | null;
+    /** Renseignée pour comrmia / adj_air / sec_adj_air, nulle ailleurs. */
+    rmia: string | null;
     nom: string; prenom: string; grade: string;
     escadron_id?: string | null;
     /** Délégations actives — l'IHM s'en sert pour afficher le bandeau d'intérim. */
     interims?: Array<{ id: string; role: string; titulaire: string }>;
   };
+}
+
+/**
+ * Forme minimale d'un compte pour émettre un jeton.
+ *
+ * Déclarée à part plutôt qu'en ligne dans la signature : trois méthodes la
+ * consomment, et une divergence entre elles produirait des jetons de contenu
+ * différent selon le chemin d'authentification emprunté — un défaut
+ * particulièrement pénible à diagnostiquer, puisqu'il ne se manifeste que sur
+ * l'un des parcours.
+ */
+interface CompteJeton {
+  id: string;
+  role: string;
+  base_id: string | null;
+  rmia: Rmia | string | null;
+  nom: string;
+  prenom: string;
+  grade: string;
+  escadron_id?: string | null;
 }
 
 @Injectable()
@@ -165,6 +189,9 @@ export class AuthService {
    * C'est ce qui borne réellement la fenêtre de révocation : au plus une durée
    * de jeton d'accès. Un intérim révoqué disparaît du jeton suivant sans
    * qu'aucune action de l'utilisateur ne soit requise.
+   *
+   * Il relit aussi la RMIA et la base : une mutation prend effet au plus tard
+   * au rafraîchissement suivant, sans déconnexion.
    */
   async refresh(refreshToken: string): Promise<{ access_token: string }> {
     try {
@@ -177,14 +204,7 @@ export class AuthService {
 
       return {
         access_token: this.jwt.sign(
-          {
-            sub: user.id,
-            role: user.role,
-            base_id: user.base_id,
-            escadron_id: user.escadron_id ?? null,
-            ...(interims.length ? { interims } : {}),
-            jti: crypto.randomBytes(8).toString('hex'),
-          },
+          this.payloadJeton(user, interims),
           { expiresIn: '10m', algorithm: 'RS256' },
         ),
       };
@@ -210,9 +230,13 @@ export class AuthService {
    *   • date_debut <= now     → une délégation programmée n'anticipe pas ;
    *   • date_fin > now | null → une délégation échue ne survit pas.
    *
-   * On ne renvoie QUE l'identifiant et le rôle : le jeton ne doit pas
-   * véhiculer d'état d'annuaire (nom, grade), qui serait figé pour 10 minutes
-   * et pourrait diverger de la base au moment de composer un tampon.
+   * La RMIA de la délégation est retenue : un suppléant qui exerce l'intérim
+   * d'un Adjoint Air doit couvrir LA région de ce dernier, pas la sienne — il
+   * peut d'ailleurs n'en avoir aucune.
+   *
+   * On ne renvoie rien d'autre : le jeton ne doit pas véhiculer d'état
+   * d'annuaire (nom, grade), qui serait figé pour dix minutes et pourrait
+   * diverger de la base au moment de composer un tampon.
    */
   private async delegationsActives(userId: string): Promise<DelegationJwt[]> {
     const maintenant = new Date();
@@ -223,28 +247,52 @@ export class AuthService {
         date_debut: { lte: maintenant },
         OR: [{ date_fin: null }, { date_fin: { gt: maintenant } }],
       },
-      select: { id: true, role_delegue: true },
+      select: { id: true, role_delegue: true, rmia: true },
     });
-    return rows.map((r) => ({ id: r.id, role: r.role_delegue as RoleUtilisateur }));
+    return rows.map((r) => ({
+      id: r.id,
+      role: r.role_delegue as RoleUtilisateur,
+      rmia: (r.rmia as Rmia | null) ?? null,
+    }));
   }
 
-  private async issueTokens(user: {
-    id: string; role: string; base_id: string; nom: string; prenom: string; grade: string;
-    escadron_id?: string | null;
-  }): Promise<LoginResult> {
+  /**
+   * Charge utile du jeton d'accès.
+   *
+   * ── Le défaut corrigé ──
+   * `rmia` était ABSENTE de toutes les signatures. Les comptes de la chaîne
+   * régionale — COMRMIA, ADJ_AIR, SEC_ADJ_AIR — recevaient donc un jeton sans
+   * région, et liste-service les rejetait : leur périmètre était vide, donc
+   * nul. Le symptôme à l'usage était une impossibilité de se connecter aux
+   * écrans de listes, sans message explicite.
+   *
+   * Factorisée ici précisément pour que le défaut ne puisse pas se reproduire
+   * sur l'un des trois chemins d'émission seulement.
+   */
+  private payloadJeton(
+    user: CompteJeton,
+    delegations: DelegationJwt[],
+  ): Record<string, unknown> {
+    return {
+      sub: user.id,
+      role: user.role,
+      // Les deux champs sont émis tels quels, `null` compris : un consommateur
+      // doit pouvoir distinguer « pas de base » de « champ oublié ».
+      base_id: user.base_id ?? null,
+      rmia: user.rmia ?? null,
+      escadron_id: user.escadron_id ?? null,
+      // Champ omis quand il n'y a aucune délégation : inutile d'alourdir
+      // le jeton du cas nominal, qui est l'immense majorité.
+      ...(delegations.length ? { interims: delegations } : {}),
+      jti: crypto.randomBytes(8).toString('hex'),
+    };
+  }
+
+  private async issueTokens(user: CompteJeton): Promise<LoginResult> {
     const delegations = await this.delegationsActives(user.id);
 
     const access_token = this.jwt.sign(
-      {
-        sub: user.id,
-        role: user.role,
-        base_id: user.base_id,
-        escadron_id: user.escadron_id ?? null,
-        // Champ omis quand il n'y a aucune délégation : inutile d'alourdir
-        // le jeton du cas nominal, qui est l'immense majorité.
-        ...(delegations.length ? { interims: delegations } : {}),
-        jti: crypto.randomBytes(8).toString('hex'),
-      },
+      this.payloadJeton(user, delegations),
       { expiresIn: this.config.get('JWT_EXPIRES_IN') ?? '10m', algorithm: 'RS256' },
     );
 
@@ -277,7 +325,9 @@ export class AuthService {
       access_token,
       refresh_token,
       user: {
-        id: user.id, role: user.role, base_id: user.base_id,
+        id: user.id, role: user.role,
+        base_id: user.base_id ?? null,
+        rmia: user.rmia ? String(user.rmia) : null,
         nom: user.nom, prenom: user.prenom, grade: user.grade,
         escadron_id: user.escadron_id ?? null,
         ...(interimsIhm ? { interims: interimsIhm } : {}),

@@ -244,3 +244,13 @@ export enum TypeNotification {
   CONSIGNE_AUTORITE   = 'CONSIGNE_AUTORITE',
   ALERTE              = 'ALERTE',
 }
+
+/** Nature d'une pièce justificative. Doit refléter l'enum PostgreSQL. */
+export enum NaturePiece {
+  ORDRE_MISSION      = 'ORDRE_MISSION',
+  TITRE_PERMISSION   = 'TITRE_PERMISSION',
+  PIECE_IDENTITE     = 'PIECE_IDENTITE',
+  CERTIFICAT_MEDICAL = 'CERTIFICAT_MEDICAL',
+  AUTORISATION       = 'AUTORISATION',
+  AUTRE              = 'AUTRE',
+}

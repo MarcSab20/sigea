@@ -40,12 +40,12 @@ export class InterimService {
       this.prisma.utilisateur.findUnique({
         where: { id: dto.titulaire_id },
         select: { id: true, nom: true, prenom: true, grade: true, role: true,
-                  base_id: true, escadron_id: true, actif: true },
+                  base_id: true, rmia: true, escadron_id: true, actif: true },
       }),
       this.prisma.utilisateur.findUnique({
         where: { id: dto.suppleant_id },
         select: { id: true, nom: true, prenom: true, grade: true, role: true,
-                  base_id: true, actif: true },
+                  base_id: true, rmia: true, actif: true },
       }),
     ]);
 
@@ -55,19 +55,31 @@ export class InterimService {
       throw new BadRequestException('Le suppléant désigné a un compte désactivé');
     }
 
-    // ── Contrainte de base ──
-    // Titulaire et suppléant doivent relever de la même base.
+    // ── Contrainte de périmètre ──
+    //
+    // Titulaire et suppléant doivent relever du MÊME périmètre : même base
+    // pour les rôles de base, même RMIA pour la chaîne régionale.
     //
     // C'est LA décision structurante de ce module. Elle garantit que le
-    // cloisonnement par base_id du jeton reste intact : le suppléant signe
-    // avec SA base, qui est aussi celle du poste couvert. Autoriser un
-    // intérim inter-bases obligerait à faire porter au jeton une base
-    // d'exercice distincte de la base d'affectation, et à réviser tous les
-    // filtres `base_id: user.base_id` du système — y compris le RLS.
-    if (titulaire.base_id !== suppleant.base_id) {
+    // cloisonnement du jeton reste intact : le suppléant signe avec SON
+    // périmètre, qui est aussi celui du poste couvert. Autoriser un intérim
+    // qui franchit cette frontière obligerait à faire porter au jeton un
+    // périmètre d'exercice distinct du périmètre d'affectation, et à réviser
+    // tous les filtres du système — y compris le RLS.
+    //
+    // Le test sur base_id seul ne suffit plus : deux officiers de RMIA
+    // différentes ont tous deux `base_id = null`, et la comparaison serait
+    // satisfaite. C'est précisément la frontière que la directive interdit
+    // de franchir.
+    const memeBase = Boolean(titulaire.base_id) && titulaire.base_id === suppleant.base_id;
+    const memeRmia = Boolean(titulaire.rmia)    && titulaire.rmia    === suppleant.rmia;
+
+    if (!memeBase && !memeRmia) {
       throw new BadRequestException(
-        'Intérim inter-bases non autorisé : titulaire et suppléant doivent relever de la même base. ' +
-        'Pour couvrir un poste sur une autre base, procédez à une mutation temporaire (gestionnaire de mouvements).',
+        titulaire.rmia || suppleant.rmia
+          ? 'Intérim inter-RMIA non autorisé : titulaire et suppléant doivent relever de la même région militaire.'
+          : 'Intérim inter-bases non autorisé : titulaire et suppléant doivent relever de la même base. ' +
+            'Pour couvrir un poste sur une autre base, procédez à une mutation temporaire (gestionnaire de mouvements).',
       );
     }
 
@@ -97,6 +109,7 @@ export class InterimService {
           suppleant_id: suppleant.id,
           role_delegue,
           base_id:      titulaire.base_id,
+          rmia:         titulaire.rmia,
           escadron_id:  titulaire.escadron_id ?? null,
           motif:        dto.motif ?? null,
           date_debut:   debut,
@@ -109,7 +122,9 @@ export class InterimService {
 
       this.logger.warn(
         `Intérim ouvert : ${suppleant.nom} assure le rôle ${role_delegue} de ${titulaire.nom} ` +
-        `(base=${titulaire.base_id}, par=${adminId})`,
+        // Le périmètre affiché suit celui du titulaire : « base=null » pour un
+        // intérim régional ne dirait rien à qui relit le journal.
+        `(${titulaire.base_id ? `base=${titulaire.base_id}` : `rmia=${titulaire.rmia}`}, par=${adminId})`,
       );
       return interim;
     } catch (e: unknown) {

@@ -14,8 +14,9 @@ import { toast } from 'sonner';
 import type { AxiosError } from 'axios';
 import type { EtapeListe, NatureLigne, Priorite } from '@sigea/shared-types';
 import {
-  listeService, circuitService, potentialiteService, messagerieService,
+  listeService, circuitService, messagerieService,
 } from '@/services/liste.service';
+import { potentialiteService } from '@/services/potentialite.service';
 
 export const clesListes = {
   toutes:      ['listes'] as const,
@@ -80,7 +81,9 @@ export function useTroncons(volId: string | undefined) {
 export function usePotentialites(q: string) {
   return useQuery({
     queryKey: clesListes.potentialites(q),
-    queryFn: () => potentialiteService.lister({ q: q || undefined, statut: 'DISPONIBLE', taille: 100 }),
+    queryFn: () => potentialiteService.lister({
+      q: q || undefined, statut: 'DISPONIBLE', taille: 100,
+    }),
   });
 }
 

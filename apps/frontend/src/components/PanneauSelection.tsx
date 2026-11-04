@@ -1,4 +1,4 @@
-// apps/frontend/src/app/listes/components/PanneauSelection.tsx
+// apps/frontend/src/components/PanneauSelection.tsx
 //
 // Sélection depuis le vivier de potentialités.
 //
@@ -10,17 +10,25 @@
 // tronçons occupés, donc la place consommée aux escales suivantes — le serveur
 // le refusera s'il est absent, et il a raison de le faire.
 //
-// L'écran applique donc une destination par défaut commune, modifiable ligne
-// par ligne : dans la grande majorité des cas, un lot de voyageurs va au même
-// endroit, et exiger vingt saisies identiques serait punitif. La destination
-// « souhaitée » enregistrée au vivier sert d'indication, jamais de valeur
-// opposable.
+// L'écran applique donc une destination par défaut commune, modifiable d'un
+// geste : dans la grande majorité des cas, un lot de voyageurs va au même
+// endroit, et exiger vingt saisies identiques serait punitif.
+//
+// ── Ce qui change ──
+// Le type `Potentialite` vient désormais de `potentialite.service` : le vivier
+// a son domaine propre depuis qu'il porte des pièces jointes et un besoin de
+// transport. Le champ libre `destination_souhaitee` a disparu au profit de
+// `base_arrivee`, qui est une vraie référence et non une chaîne saisie — on
+// peut donc la comparer à l'itinéraire du vol, ce que l'ancienne ne permettait
+// pas.
 
 import React, { useMemo, useState } from 'react';
 import { Search, UserPlus, Loader2, X } from 'lucide-react';
 import type { Priorite } from '@sigea/shared-types';
-import { usePotentialites, useSelectionner } from '@/hooks/useListes';
-import type { Potentialite, Disponibilite } from '@/services/liste.service';
+import { useSelectionner } from '@/hooks/useListes';
+import { usePotentialites } from '@/hooks/useListes';
+import type { Potentialite } from '@/services/potentialite.service';
+import type { Disponibilite } from '@/services/liste.service';
 
 interface Props {
   listeId: string;
@@ -41,7 +49,7 @@ export default function PanneauSelection(props: Props): React.ReactElement {
   const { data, isLoading } = usePotentialites(recherche);
   const selectionner = useSelectionner(props.listeId, props.volId);
 
-  const elements = data?.elements ?? [];
+  const elements: Potentialite[] = data?.elements ?? [];
   const nbChoisis = Object.keys(choisis).length;
 
   // Avertissement en amont de l'envoi. Le serveur bascule automatiquement
@@ -51,11 +59,24 @@ export default function PanneauSelection(props: Props): React.ReactElement {
     [nbChoisis, props.disponibilite.places],
   );
 
+  /**
+   * Point d'itinéraire correspondant à la destination souhaitée.
+   *
+   * Quand le demandeur a exprimé une base d'arrivée et que le vol la dessert,
+   * on l'applique à lui seul plutôt que la valeur par défaut. C'est ce que le
+   * secrétaire ferait à la main, et le faire ici évite vingt corrections.
+   */
+  function ordreSouhaite(p: Potentialite): number {
+    const code = p.base_arrivee?.code_base;
+    const point = code ? props.destinations.find((d) => d.code_base === code) : undefined;
+    return point?.ordre ?? destinationParDefaut;
+  }
+
   function basculer(p: Potentialite): void {
     setChoisis((c) => {
       const copie = { ...c };
       if (copie[p.id]) delete copie[p.id];
-      else copie[p.id] = destinationParDefaut;
+      else copie[p.id] = ordreSouhaite(p);
       return copie;
     });
   }
@@ -99,17 +120,26 @@ export default function PanneauSelection(props: Props): React.ReactElement {
         </div>
 
         <label className="flex items-center gap-2 text-sm text-slate-700">
-          Destination appliquée aux sélections :
+          Destination par défaut :
           <select
             value={destinationParDefaut}
             onChange={(e) => {
               const ordre = Number(e.target.value);
               setDestinationParDefaut(ordre);
-              // On réapplique aux choix déjà faits : changer la destination
-              // par défaut après coup est le geste naturel quand on s'aperçoit
-              // de son erreur, et ne rien recalculer serait trompeur.
+              // On réapplique aux choix déjà faits, sauf à ceux dont la
+              // destination souhaitée est desservie : changer la valeur par
+              // défaut ne doit pas écraser une correspondance exacte.
               setChoisis((c) =>
-                Object.fromEntries(Object.keys(c).map((k) => [k, ordre])));
+                Object.fromEntries(
+                  Object.keys(c).map((id) => {
+                    const p = elements.find((x) => x.id === id);
+                    const code = p?.base_arrivee?.code_base;
+                    const exact = code
+                      ? props.destinations.find((d) => d.code_base === code)
+                      : undefined;
+                    return [id, exact?.ordre ?? ordre];
+                  }),
+                ));
             }}
             className="rounded border border-slate-300 px-2 py-1 text-sm"
           >
@@ -139,6 +169,11 @@ export default function PanneauSelection(props: Props): React.ReactElement {
         <ul className="divide-y divide-slate-100">
           {elements.map((p) => {
             const retenu = Boolean(choisis[p.id]);
+            const code = p.base_arrivee?.code_base;
+            const desservie = code
+              ? props.destinations.some((d) => d.code_base === code)
+              : false;
+
             return (
               <li key={p.id}>
                 <button
@@ -154,11 +189,22 @@ export default function PanneauSelection(props: Props): React.ReactElement {
                     </span>
                     <span className="block text-xs text-slate-500">
                       {p.unite ?? 'Unité non précisée'} — {p.categorie}
-                      {p.destination_souhaitee ? ` — souhaite : ${p.destination_souhaitee}` : ''}
+                      {code ? ` — souhaite : ${code}` : ''}
                       {' — '}{Number(p.masse_bagages_kg)} kg
                     </span>
+                    {code && !desservie && (
+                      <span className="block text-xs text-amber-700">
+                        Destination non desservie par ce vol — la valeur par défaut
+                        sera appliquée.
+                      </span>
+                    )}
                   </span>
                   <span className="flex items-center gap-2 px-2">
+                    {(p._count?.pieces ?? 0) > 0 && (
+                      <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">
+                        {p._count?.pieces} pièce(s)
+                      </span>
+                    )}
                     <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-700">
                       {p.priorite_proposee}
                     </span>

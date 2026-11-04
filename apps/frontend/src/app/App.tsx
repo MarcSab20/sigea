@@ -33,6 +33,7 @@ import ArchivesPage from './archives/ArchivesPage';
 import AdminPage from './admin/AdminPage';
 import Layout from '@/components/Layout';
 import ProfilePage from './profile/ProfilePage';
+import PotentialitesPage from './potentialites/PotentialitesPage';
 
 function PrivateRoute({ children }: { children: React.ReactNode }): React.ReactElement {
   const { user } = useAuthStore();
@@ -76,7 +77,8 @@ export default function App(): React.ReactElement {
       */}
       <Route path="/listes"     element={<PrivateRoute><ListesPage /></PrivateRoute>} />
       <Route path="/listes/:id" element={<PrivateRoute><ListeDetailPage /></PrivateRoute>} />
-
+      <Route path="/potentialites" element={
+      <RoleRoute roles={['sec_adj_air']}><PotentialitesPage /></RoleRoute> } />
       {/* ── Manifestes : lecture, et discrimination finale du COMBORD ── */}
       <Route path="/manifestes/*" element={<PrivateRoute><ManifestesPage /></PrivateRoute>} />
 

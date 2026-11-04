@@ -2,19 +2,15 @@
 //
 // Cloisonnement à trois niveaux : base, RMIA, national.
 //
-// ═══════════════════════════════════════════════════════════════════════════
-// POURQUOI CE FICHIER REMPLACE BaseCloisonnementGuard
-// ═══════════════════════════════════════════════════════════════════════════
-// L'ancienne garde ne connaissait que deux cas : « autorité centrale, lecture
-// partout » ou « cloisonné par base_id ». La chaîne RMIA n'entre dans ni l'un
-// ni l'autre : l'Adjoint Air de la RMIA 2 n'est pas national, et son périmètre
-// n'est pas une base mais sept bases réparties sur deux régions administratives.
-// Appliquer l'ancienne garde à ces rôles revenait à leur donner accès aux seules
-// ressources de leur base d'affectation — c'est-à-dire à presque rien.
+// ── Ce qui change : les comptes sans base ──
+// La chaîne RMIA n'est plus rattachée à une base. `user.base_id` vaut donc
+// `null` pour ces comptes, et toute comparaison directe à une base devient
+// un piège : `null === 'BA101'` est faux, ce qui donne le bon résultat par
+// accident, mais `null !== demandee` l'est aussi, ce qui refuserait l'accès
+// pour une mauvaise raison et produirait un message incompréhensible.
 //
-// La directive exige par ailleurs explicitement que « les données de la RMIA X
-// ne soient pas manipulées par la RMIA Y ». C'est ce que fait la branche RMIA
-// ci-dessous, en écriture comme en lecture.
+// La branche BASE commence donc par constater l'absence de base et refuse
+// explicitement, avec un message qui dit ce qui ne va pas.
 
 import {
   Injectable, CanActivate, ExecutionContext, ForbiddenException, Logger,
@@ -93,6 +89,20 @@ export class PerimetreGuard implements CanActivate {
     }
 
     // ── Périmètre base ───────────────────────────────────────────────────
+    if (!user.base_id) {
+      // Ni base, ni RMIA, ni périmètre national : le compte n'a aucun
+      // périmètre. C'est un défaut d'administration, et le message doit le
+      // dire — un simple « accès refusé » enverrait l'utilisateur chercher
+      // une habilitation là où c'est son rattachement qui manque.
+      this.logger.error(
+        `Compte sans périmètre : user=${user.sub} role=${user.role}`,
+      );
+      throw new ForbiddenException(
+        "Votre compte n'est rattaché ni à une base ni à une région militaire. " +
+          "Contactez l'administrateur.",
+      );
+    }
+
     const baseDemandee = this.extraire(req, 'base_id');
     if (baseDemandee && baseDemandee !== user.base_id) {
       this.logger.warn(
@@ -100,7 +110,7 @@ export class PerimetreGuard implements CanActivate {
           `base_ressource=${baseDemandee} path=${req.path} ip=${req.ip}`,
       );
       throw new ForbiddenException(
-        `Accès refusé : vous ne pouvez accéder qu'aux ressources de votre base.`,
+        'Accès refusé : vous ne pouvez accéder qu\'aux ressources de votre base.',
       );
     }
     return true;
@@ -111,8 +121,7 @@ export class PerimetreGuard implements CanActivate {
    *
    * Params, corps, query puis en-tête : l'ordre va du plus explicite au moins
    * fiable. Chaînage optionnel partout — un GET sans corps ne doit pas produire
-   * un 500 dans une garde de sécurité, ce qui était le défaut de la version
-   * initiale de BaseCloisonnementGuard.
+   * un 500 dans une garde de sécurité.
    */
   private extraire(req: RequeteHttp, cle: 'base_id' | 'rmia'): string | undefined {
     const entete = cle === 'base_id' ? 'x-base-id' : 'x-rmia';
@@ -127,9 +136,5 @@ export class PerimetreGuard implements CanActivate {
 
 /**
  * @deprecated Alias transitoire vers PerimetreGuard.
- *
- * Conservé pour que les contrôleurs non encore repris continuent de compiler.
- * À supprimer une fois les lots 2 à 5 intégrés : laisser deux noms pour une
- * même garde finit toujours par produire deux comportements.
  */
 export { PerimetreGuard as BaseCloisonnementGuard };

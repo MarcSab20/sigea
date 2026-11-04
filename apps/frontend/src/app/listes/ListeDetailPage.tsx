@@ -15,9 +15,14 @@
 // COMRMIA qu'à l'Adjoint Air — ce qui, sur un document signé, est une faute.
 //
 // Les capacités d'action sont donc dérivées de `avancement.etape_courante`
-// croisée avec le rôle, en un seul endroit, juste en dessous. Et elles ne font
-// que MASQUER des commandes : le serveur refuse de toute façon une action hors
-// tour. Ne relâchez jamais l'un en comptant sur l'autre.
+// croisée avec le rôle, en un seul endroit. Et elles ne font que MASQUER des
+// commandes : le serveur refuse de toute façon une action hors tour. Ne
+// relâchez jamais l'un en comptant sur l'autre.
+//
+// ── Ce qui change dans cette version ──
+// Le masquage silencieux est remplacé par BandeauEtape, qui dit explicitement
+// où en est le dossier et pourquoi l'utilisateur ne peut plus agir. Le silence
+// d'une interface est toujours interprété, et presque toujours mal.
 
 import React, { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
@@ -36,6 +41,8 @@ import TableauPriorite from '../../components/TableauPriorite';
 import BlocsVisas from '../../components/BlocsVisas';
 import TronconsBarre from '../../components/TronconsBarre';
 import PanneauSelection from '../../components/PanneauSelection';
+import BandeauEtape from '../../components/BandeauEtape';
+import PanneauDelegation from '../../components/PanneauDelegation';
 import type { LigneListe } from '@/services/liste.service';
 
 /** Rôles autorisés à discriminer, par étape. */
@@ -89,6 +96,16 @@ export default function ListeDetailPage(): React.ReactElement {
     etape && user && (ROLE_PAR_ETAPE[etape] ?? []).includes(user.role),
   );
 
+  /**
+   * Étape de l'utilisateur dans CE circuit.
+   *
+   * `null` pour une autorité centrale ou un administrateur : ils consultent
+   * sans y intervenir, et le bandeau doit le dire plutôt que de laisser croire
+   * à un défaut de droits.
+   */
+  const monEtape = (Object.keys(ROLE_PAR_ETAPE) as EtapeListe[])
+    .find((e) => user && ROLE_PAR_ETAPE[e].includes(user.role)) ?? null;
+
   const saisissable = monTour && etape === EtapeListe.SEC_ADJ_AIR;
   const discriminable = monTour && etape !== EtapeListe.SEC_ADJ_AIR;
 
@@ -97,6 +114,15 @@ export default function ListeDetailPage(): React.ReactElement {
   // base, et la note conserve qui a réellement discriminé.
   const delegue = etape === EtapeListe.COMBASE &&
     (user?.role === RoleUtilisateur.COMGMO || user?.role === RoleUtilisateur.COMSECBASE);
+
+  /**
+   * Le commandant de base peut déléguer dès que la liste existe, sans attendre
+   * qu'elle lui parvienne. C'est même le cas nominal : on délègue parce qu'on
+   * part, donc par avance. Exiger la présence du dossier obligerait à être là
+   * au moment précis où l'on ne l'est pas.
+   */
+  const peutDeleguer = user?.role === RoleUtilisateur.COMBASE
+    && liste.statut !== 'ARRETEE' && liste.statut !== 'CLOTUREE';
 
   const bloque = (avancement?.escales_amont_en_attente.length ?? 0) > 0 &&
     etape === EtapeListe.COMBASE;
@@ -195,12 +221,21 @@ export default function ListeDetailPage(): React.ReactElement {
         </div>
       </header>
 
-      {liste.motif_rejet && (
-        <div className="mb-5 flex gap-3 rounded border border-red-300 bg-red-50 p-3 text-sm text-red-900">
-          <Undo2 className="h-5 w-5 shrink-0" />
-          <p><strong>Liste renvoyée.</strong> {liste.motif_rejet}</p>
-        </div>
-      )}
+      {/*
+        Le bandeau remplace l'ancien encadré de renvoi : il couvre ce cas, et
+        quatre autres que l'écran laissait sans explication — mon tour, j'ai
+        déjà visé, le dossier n'est pas encore arrivé, je ne suis pas du circuit.
+      */}
+      <BandeauEtape
+        etape={etape}
+        statut={liste.statut}
+        monEtape={monEtape}
+        monTour={monTour}
+        blocs={avancement?.blocs ?? []}
+        motifRejet={liste.motif_rejet}
+      />
+
+      {peutDeleguer && <PanneauDelegation listeId={liste.id} />}
 
       {bloque && (
         <div className="mb-5 flex gap-3 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">

@@ -286,9 +286,21 @@ export class ListeStateMachine {
         where: { liste_id, statut: StatutMessage.EN_ATTENTE },
       });
       // Le verrou posé à l'arrêté est levé : la liste redevient modifiable.
+            // Le verrou posé à l'arrêté est levé : la liste redevient modifiable.
       await tx.ligneListe.updateMany({
         where: { liste_id, origine: 'SAISIE' },
         data:  { verrouille: false },
+      });
+
+      // La délégation tombe avec le renvoi : elle portait sur un dossier qui
+      // n'existe plus sous cette forme. Le commandant de base la renouvellera
+      // s'il le souhaite, en connaissance du motif de renvoi.
+      await tx.listeEmbarquement.updateMany({
+        where: { id: liste_id },
+        data: {
+          delegue_a_id: null, delegue_par: null,
+          delegue_le: null, motif_delegation: null,
+        },
       });
     });
 
@@ -415,7 +427,7 @@ export class ListeStateMachine {
    * quelqu'un qui n'est pas commandant de base.
    */
   private async resoudreSignataire(
-    liste: { etape: { base_id: string }; rmia: unknown },
+    liste: { etape: { base_id: string }; rmia: unknown; delegue_a_id: string | null },
     etape: EtapeListe,
     user: JwtPayload,
   ): Promise<{
@@ -454,6 +466,15 @@ export class ListeStateMachine {
     // Cas 3 : discrimination déléguée par le COMBASE.
     if (etape === EtapeListe.COMBASE &&
         roles.some((r) => ROLES_DELEGATAIRES_COMBASE.includes(r))) {
+
+      if (liste.delegue_a_id !== user.sub) {
+        throw new ForbiddenException(
+          liste.delegue_a_id
+            ? "Cette liste a été déléguée à un autre officier."
+            : "Le commandant de base ne vous a pas désigné pour discriminer cette liste.",
+        );
+      }
+
       const combase = await this.prisma.utilisateur.findFirst({
         where: { role: RoleUtilisateur.COMBASE, base_id: liste.etape.base_id, actif: true },
         select: { id: true, nom: true, prenom: true, grade: true },

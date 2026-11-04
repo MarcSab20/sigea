@@ -124,6 +124,12 @@ RETURNS TRIGGER AS $$
 DECLARE
   base_escadron TEXT;
 BEGIN
+    -- Une chaîne vide n'est pas une base, et n'est pas non plus « pas de base » :
+  -- c'est une valeur qui passe tous les tests `IS NOT NULL` tout en ne
+  -- désignant rien. Un formulaire HTML dont le select n'a pas été choisi en
+  -- produit une. On normalise ici, une fois, plutôt que dans chaque appelant.
+  NEW.base_id     := NULLIF(NEW.base_id, '');
+  NEW.escadron_id := NULLIF(NEW.escadron_id, '');
   -- Escadron
   IF NEW.escadron_id IS NOT NULL THEN
     IF NEW.role <> 'comea' THEN
@@ -148,17 +154,36 @@ BEGIN
   END IF;
 
   -- RMIA : obligatoire pour la chaîne régionale, interdite ailleurs.
-  IF NEW.role IN ('comrmia', 'adj_air', 'sec_adj_air') AND NEW.rmia IS NULL THEN
-    RAISE EXCEPTION
-      'Le rôle % exige une RMIA de rattachement : sans elle, le titulaire ne voit aucune liste',
-      NEW.role
-      USING ERRCODE = 'check_violation';
-  END IF;
-
-  IF NEW.role NOT IN ('comrmia', 'adj_air', 'sec_adj_air') AND NEW.rmia IS NOT NULL THEN
-    RAISE EXCEPTION
-      'Le rôle % ne se rattache pas à une RMIA (valeur fournie : %)', NEW.role, NEW.rmia
-      USING ERRCODE = 'check_violation';
+    -- Périmètre : exactement un des deux, jamais les deux, jamais aucun.
+  --
+  -- Un compte sans base NI RMIA n'a aucun périmètre et ne voit rien ; un
+  -- compte avec les deux en aurait deux, et l'on ne saurait plus lequel
+  -- s'applique. Les deux cas sont des erreurs d'administration silencieuses,
+  -- d'où un contrôle au niveau de la base et pas seulement du service.
+  IF NEW.role IN ('comrmia', 'adj_air', 'sec_adj_air') THEN
+    IF NEW.rmia IS NULL THEN
+      RAISE EXCEPTION
+        'Le rôle % exige une RMIA de rattachement', NEW.role
+        USING ERRCODE = 'check_violation';
+    END IF;
+    IF NEW.base_id IS NOT NULL THEN
+      RAISE EXCEPTION
+        'Le rôle % relève d''une région, pas d''une base (base fournie : %)',
+        NEW.role, NEW.base_id
+        USING ERRCODE = 'check_violation';
+    END IF;
+  ELSE
+    IF NEW.rmia IS NOT NULL THEN
+      RAISE EXCEPTION
+        'Le rôle % ne se rattache pas à une RMIA (valeur fournie : %)',
+        NEW.role, NEW.rmia
+        USING ERRCODE = 'check_violation';
+    END IF;
+    IF NEW.base_id IS NULL THEN
+      RAISE EXCEPTION
+        'Le rôle % exige une base d''affectation', NEW.role
+        USING ERRCODE = 'check_violation';
+    END IF;
   END IF;
 
   RETURN NEW;

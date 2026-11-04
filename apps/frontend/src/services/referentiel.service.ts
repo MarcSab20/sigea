@@ -8,6 +8,7 @@ export interface BaseDB {
   code_base: string;
   nom: string;
   region: string;
+  rmia: string;
 }
 
 export interface AeronefDB {

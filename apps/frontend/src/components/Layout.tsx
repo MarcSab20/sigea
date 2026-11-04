@@ -7,16 +7,18 @@ import { T } from '@/lib/theme';
 import BandeauHorsLigne from './BandeauHorsLigne';
 
 const NAV_ITEMS = [
-  { path: '/',            label: 'Tableau de Bord', icon: '⊞'                          },
-  { path: '/manifestes',  label: 'Manifestes',      icon: '📋', roles: ['chef_escale'] },
-  { path: '/vols',        label: 'Vols',            icon: '✈' , roles:['comea', 'comgmo']                         },
-  { path: '/validations', label: 'Validations',     icon: '✓'                          },
-  { path: '/cemaa',       label: 'Espace CEMAA',    icon: '⬡',  roles: ['cemaa']       },
-  { path: '/mage',        label: 'Espace MAGE',     icon: '◇',  roles: ['mage']        },
-  { path: '/exploitation', label: 'Exploitation',    icon: '📊', roles: ['admin', 'combase', 'comgmo', 'comea', 'comeso', 'cemaa', 'mage']           },
-  { path: '/archives',     label: 'Archivé',         icon: '🗄'                          },
-  { path: '/admin',       label: 'Administration',  icon: '⚙',  roles: ['admin']       },
-  { path: '/profile',     label: 'Mon profil',      icon: '👤'                         },
+  { path: '/',               label: 'Tableau de bord', icon: '⊞'                                   },
+  { path: '/vols',           label: 'Vols',            icon: '✈', roles: ['combase', 'comea', 'admin'] },
+  { path: '/scops',          label: 'Diffusion',       icon: '📡', roles: ['scops', 'admin']        },
+  { path: '/potentialites',  label: 'Potentialités',   icon: '👥', roles: ['sec_adj_air']           },
+  { path: '/listes',         label: 'Listes',          icon: '📑', roles: ['sec_adj_air', 'adj_air', 'comrmia', 'combase', 'comsecbase', 'comgmo', 'combord', 'admin'] },
+  { path: '/manifestes',     label: 'Manifestes',      icon: '📋', roles: ['combord', 'combase', 'admin'] },
+  { path: '/cemaa',          label: 'Espace CEMAA',    icon: '⬡', roles: ['cemaa']                  },
+  { path: '/mage',           label: 'Espace MAGE',     icon: '◇', roles: ['mage']                   },
+  { path: '/exploitation',   label: 'Exploitation',    icon: '📊', roles: ['admin', 'combase', 'comsecbase', 'comgmo', 'comea', 'comrmia', 'scops', 'cemaa', 'mage'] },
+  { path: '/archives',       label: 'Archivé',         icon: '🗄'                                   },
+  { path: '/admin',          label: 'Administration',  icon: '⚙', roles: ['admin']                  },
+  { path: '/profile',        label: 'Mon profil',      icon: '👤'                                   },
 ];
 
 export default function Layout({ children }: { children: React.ReactNode }): React.ReactElement {

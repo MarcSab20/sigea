@@ -233,7 +233,7 @@ export class ListesService {
     if (rmias.length) {
       clauses.push({ rmia: { in: rmias } });
     }
-    if (roles.some((r) => r === RoleUtilisateur.COMBASE || ROLES_DELEGATAIRES_COMBASE.includes(r))) {
+    if (user.base_id && roles.some((r) => r === RoleUtilisateur.COMBASE || ROLES_DELEGATAIRES_COMBASE.includes(r))) {
       clauses.push({ etape: { base_id: user.base_id } });
     }
     if (roles.includes(RoleUtilisateur.COMBORD)) {
@@ -367,6 +367,7 @@ export class ListesService {
     const ids = dto.selections.map((s) => s.potentialite_id);
     const viviers = await this.prisma.potentialite.findMany({
       where: { id: { in: ids }, rmia: liste.rmia },
+      include: { base_arrivee: { select: { code_base: true } } },
     });
     if (viviers.length !== ids.length) {
       throw new BadRequestException(
@@ -430,7 +431,7 @@ export class ListesService {
         telephone: v.telephone, categorie: v.categorie,
         embarquement_ordre: liste.etape.ordre,
         debarquement_ordre: s.debarquement_ordre,
-        destination:        v.destination_souhaitee ?? `Point ${s.debarquement_ordre}`,
+        destination:        v.base_arrivee?.code_base ?? `Point ${s.debarquement_ordre}`,
         nb_bagages:         v.nb_bagages,
         masse_bagages_kg:   v.masse_bagages_kg,
         contact_urgence_nom:  v.contact_urgence_nom,

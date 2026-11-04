@@ -237,7 +237,13 @@ export class VolsService {
       };
     }
 
-    // Périmètre base. Deux cas se cumulent :
+    // Périmètre base. Un compte sans base ni RMIA n'a aucun périmètre : la
+    // clause impossible `{ id: '' }` est volontaire. Renvoyer `{}` ouvrirait
+    // tout, et omettre la clause reviendrait au même — deux façons discrètes
+    // de transformer un défaut d'administration en fuite d'information.
+    if (!user.base_id) return { id: '' };
+
+    // Deux cas se cumulent :
     //   • les vols au départ de la base, visibles dès la planification — leur
     //     créateur et sa hiérarchie doivent pouvoir les relire ;
     //   • les vols diffusés qui touchent la base, à quelque titre que ce soit.

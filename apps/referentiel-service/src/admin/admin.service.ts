@@ -48,7 +48,7 @@ export class AdminService {
    */
   private async resolveEscadron(
     role: RoleUtilisateur,
-    base_id: string,
+    base_id: string | null,
     escadron_id?: string | null,
   ): Promise<string | null> {
     const exige = ROLES_AVEC_ESCADRON.includes(role);
