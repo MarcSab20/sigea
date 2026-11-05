@@ -25,9 +25,7 @@ export class CreatePotentialiteDto {
   @IsOptional() @IsString() @MaxLength(30) matricule?: string;
   @IsOptional() @IsString() @MaxLength(30) cni?: string;
   @IsOptional() @IsString() @MaxLength(60) unite?: string;
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number;
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1) taille?: number;
-  
+
   @IsString()
   @Matches(TELEPHONE, { message: 'telephone : numéro invalide' })
   telephone!: string;
@@ -86,8 +84,8 @@ export class FiltrePotentialiteDto {
   @IsOptional() @IsString() base_depart_id?: string;
   @IsOptional() @IsString() base_arrivee_id?: string;
 
-  @IsOptional() @IsInt() @Min(1) page?: number;
-  @IsOptional() @IsInt() @Min(1) taille?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) taille?: number;
 
   /** Inclut les potentialités périmées. Exclues par défaut. */
   @IsOptional() @IsIn(['0', '1']) inclure_perimees?: string;

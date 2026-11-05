@@ -58,7 +58,6 @@ export class ProxyService {
           url: targetUrl,
           data: hasBody ? req.body : undefined,
           headers,
-          params: req.query,
           responseType: 'stream',
           validateStatus: (status) => status < 500,
         }),

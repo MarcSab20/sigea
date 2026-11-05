@@ -9,7 +9,7 @@ async function bootstrap(): Promise<void> {
   const logger = new Logger('Bootstrap');
 
   app.useGlobalPipes(
-    new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
+    new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true, transformOptions: { enableImplicitConversion: true }, }),
   );
   app.setGlobalPrefix('api');
 
