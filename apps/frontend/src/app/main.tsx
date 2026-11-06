@@ -5,6 +5,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import App from './App';
 import './globals.css';
+import { restaurerSession } from '@/lib/api';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -19,13 +20,21 @@ const queryClient = new QueryClient({
   },
 });
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <App />
-        <Toaster richColors position="top-right" />
-      </BrowserRouter>
-    </QueryClientProvider>
-  </React.StrictMode>,
-);
+function demarrer(): void {
+  ReactDOM.createRoot(document.getElementById('root')!).render(
+    <React.StrictMode>
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
+          <App />
+          <Toaster richColors position="top-right" />
+        </BrowserRouter>
+      </QueryClientProvider>
+    </React.StrictMode>,
+  );
+};
+
+const garde = new Promise<void>((resoudre) => setTimeout(resoudre, 3000));
+
+void Promise.race([restaurerSession().then(() => undefined), garde])
+  .catch(() => undefined)
+  .finally(demarrer);

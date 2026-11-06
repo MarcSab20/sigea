@@ -11,7 +11,6 @@ import {
   estEnLigne, etat, synchroniser, purgerEchecs,
   activerSynchronisationAuto, EtatSynchronisation,
 } from '@/offline/outbox';
-import { purgerBrouillonsTransmis } from '@/services/manifeste.service';
 import { T } from '@/lib/theme';
 
 export default function BandeauHorsLigne(): React.ReactElement | null {
@@ -29,7 +28,6 @@ export default function BandeauHorsLigne(): React.ReactElement | null {
       setSync(e);
       // Les brouillons dont toutes les opérations sont parties n'ont plus lieu
       // d'être affichés localement : la version serveur fait foi.
-      void purgerBrouillonsTransmis();
     });
     void etat().then(setSync);
 
@@ -44,13 +42,11 @@ export default function BandeauHorsLigne(): React.ReactElement | null {
 
   const forcer = async (): Promise<void> => {
     await synchroniser();
-    await purgerBrouillonsTransmis();
     setSync(await etat());
   };
 
   const abandonner = async (): Promise<void> => {
     await purgerEchecs();
-    await purgerBrouillonsTransmis();
     setSync(await etat());
   };
 

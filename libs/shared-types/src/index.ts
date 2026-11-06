@@ -5,3 +5,4 @@ export * from './rmia';
 export * from './circuit-liste';
 export * from './interfaces';
 export * from './dto';
+export * from './grades';

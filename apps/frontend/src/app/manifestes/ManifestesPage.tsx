@@ -1,691 +1,489 @@
 // apps/frontend/src/app/manifestes/ManifestesPage.tsx
-import React, { useState, useEffect } from 'react';
-import { useNavigate, useParams, Routes, Route, useSearchParams } from 'react-router-dom';
-import { useAuthStore } from '@/stores/auth.store';
-import { manifesteApi, volApi, Manifeste, Vol, Passager, Materiel, CreateManifesteDto,
-  ActionEnLigneRequise } from '@/services/manifeste.service';
-import { estIdentifiantLocal, estEnLigne } from '@/offline/outbox';
-import { T } from '@/lib/theme';
+//
+// ═══════════════════════════════════════════════════════════════════════════
+// POURQUOI CETTE PAGE EST RÉÉCRITE
+// ═══════════════════════════════════════════════════════════════════════════
+// L'ancienne version comptait trois écrans — liste, création, saisie — bâtis
+// sur un modèle qui n'existe plus : le manifeste y était créé à la main,
+// passait par un statut BROUILLON, et portait cinq blocs de signature.
+//
+// Depuis la directive, le manifeste est l'EXTRAIT de la liste hiérarchisée,
+// émis automatiquement à l'arrêté du commandant de base. Personne ne le
+// saisit. Il ne reste que deux écrans : consulter, et — pour le seul
+// commandant de bord — discriminer puis viser.
+//
+// C'est ce décalage qui provoquait la page blanche : `SaisieManifestePage`
+// lisait `manifeste.id` sur une réponse dont la forme avait changé.
+
+import React, { useState } from 'react';
+import { Routes, Route, useParams, Link, useNavigate } from 'react-router-dom';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import ManifestePrint from '@/components/ManifestePrint';
+import type { AxiosError } from 'axios';
+import {
+  Loader2, FileText, Users, Package, UserMinus, RotateCcw, Send, CheckCircle2, Plane,
+} from 'lucide-react';
+import { RoleUtilisateur } from '@sigea/shared-types';
+import { useAuthStore } from '@/stores/auth.store';
+import { ouvrirDocument } from '@/lib/api';
+import {
+  manifesteService,
+  type ManifesteResume, type PassagerManifeste, type ManifesteDetail,
+} from '@/services/manifeste.service';
 
-// ─── Composants UI ─────────────────────────────────────────────────────────
-function Card({ children, style={} }: { children: React.ReactNode; style?: React.CSSProperties }): React.ReactElement {
-  return <div style={{ background: T.bgCard, border: `1px solid ${T.border}`,
-    borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.06)', ...style }}>{children}</div>;
+function messageErreur(e: unknown): string {
+  const err = e as AxiosError<{ message?: string | string[] }>;
+  const m = err.response?.data?.message;
+  return Array.isArray(m) ? m.join(' — ') : (m ?? err.message ?? 'Erreur inattendue');
 }
 
-function Field({ label, value, onChange, type='text', required, options, placeholder, disabled, rows }: {
-  label: string; value: string; onChange: (v: string) => void;
-  type?: string; required?: boolean; disabled?: boolean;
-  options?: { value: string; label: string }[];
-  placeholder?: string; rows?: number;
-}): React.ReactElement {
-  const [focused, setFocused] = useState(false);
-  const base: React.CSSProperties = {
-    width: '100%', padding: '9px 12px', background: focused ? T.bgCard : T.bgInput,
-    border: `1px solid ${focused ? T.green : T.border}`, borderRadius: 6, color: T.text,
-    fontSize: 13, outline: 'none', boxSizing: 'border-box', transition: 'border-color 0.2s',
-    fontFamily: T.body, boxShadow: focused ? `0 0 0 3px ${T.green}20` : 'none',
-  };
-  return (
-    <div style={{ marginBottom: 14 }}>
-      <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: T.textSub, marginBottom: 5 }}>
-        {label}{required && <span style={{ color: T.red, marginLeft: 3 }}>*</span>}
-      </label>
-      {options ? (
-        <select value={value} onChange={e => onChange(e.target.value)} disabled={disabled}
-          onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} style={base}>
-          <option value="">— Sélectionner —</option>
-          {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
-      ) : rows ? (
-        <textarea value={value} onChange={e => onChange(e.target.value)} rows={rows}
-          placeholder={placeholder} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
-          style={{ ...base, resize: 'vertical' }} />
-      ) : (
-        <input type={type} value={value} onChange={e => onChange(e.target.value)}
-          placeholder={placeholder} disabled={disabled}
-          onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} style={base} />
-      )}
-    </div>
-  );
-}
-
-const CATEGORIES = ['TROUPES','TROUPES_PARA','CHEF_MIL','MISSION','PERMISSION','EVASAN','VIP','CIVIL','OP_SENSIBLE'];
-const TYPES_LOG = ['AA','IA','INTERMINISTERIEL','INDIVIDUEL','SENSIBLE_CEMAA'];
-
-/**
- * Message d'erreur lisible.
- *
- * Distingue trois cas que l'opérateur ne doit pas confondre : une action
- * impossible hors ligne (inutile de réessayer), un refus du serveur (corriger
- * la saisie), et une panne réseau (réessayer plus tard). Un « Erreur »
- * générique ferait réessayer indéfiniment dans le premier cas.
- */
-const messageErreur = (e: unknown): string => {
-  if (e instanceof ActionEnLigneRequise) return e.message;
-  const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message;
-  if (msg) return msg;
-  if (!estEnLigne()) return 'Réseau indisponible — action reportée ou impossible hors ligne.';
-  return (e as Error)?.message ?? 'Erreur';
+const LIBELLE_STATUT: Record<string, { texte: string; classe: string }> = {
+  EMIS:      { texte: 'Émis — en attente du visa du bord', classe: 'bg-amber-100 text-amber-800' },
+  DEFINITIF: { texte: 'Définitif',                          classe: 'bg-emerald-100 text-emerald-800' },
+  ANNULE:    { texte: 'Annulé',                             classe: 'bg-red-100 text-red-800' },
 };
-
-const statusColor = (s: string): string =>
-  s==='VALIDE'?T.green:s==='REJETE'?T.red:s==='SOUMIS'?T.amberLight:s==='EN_VALIDATION'?T.blue:T.textDim;
-
-// ─── LISTE ────────────────────────────────────────────────────────────────────
-function ManifestesListPage(): React.ReactElement {
-  const navigate = useNavigate();
-  const [manifestes, setManifestes] = useState<Manifeste[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    manifesteApi.list().then(setManifestes).catch(() => toast.error('Erreur')).finally(() => setLoading(false));
-  }, []);
-
-  return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
-        <div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: T.text, fontFamily: T.display }}>Manifestes d'Escale</h1>
-          <p style={{ fontSize: 13, color: T.textDim, marginTop: 4 }}>Gestion des manifestes de votre base</p>
-        </div>
-        <button onClick={() => navigate('/manifestes/nouveau')} style={{
-          padding: '10px 20px', background: T.green, border: 'none', borderRadius: 6,
-          color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>+ Nouveau</button>
-      </div>
-      <Card>
-        {loading ? <div style={{ padding: 48, textAlign: 'center', color: T.textDim }}>Chargement…</div> :
-        manifestes.length === 0 ? (
-          <div style={{ padding: 60, textAlign: 'center' }}>
-            <div style={{ fontSize: 14, color: T.textDim, marginBottom: 20 }}>Aucun manifeste</div>
-            <button onClick={() => navigate('/manifestes/nouveau')} style={{
-              padding: '10px 24px', background: T.green, border: 'none', borderRadius: 6,
-              color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Créer maintenant</button>
-          </div>
-        ) : (
-          <div>
-            <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr 120px 130px 50px 60px 130px',
-              padding: '8px 20px', fontSize: 10, fontWeight: 600, color: T.textDim,
-              textTransform: 'uppercase', letterSpacing: '0.08em', borderBottom: `1px solid ${T.border}` }}>
-              <span>Réf.</span><span>Vol</span><span>Date</span><span>Statut</span>
-              <span>PAX</span><span>Ver.</span><span style={{ textAlign: 'right' }}>Actions</span>
-            </div>
-            {manifestes.map(m => {
-              const col = statusColor(m.statut);
-              return (
-                <div key={m.id} className="row-hover" onClick={() => navigate(`/manifestes/${m.id}`)}
-                  style={{ display: 'grid', gridTemplateColumns: '90px 1fr 120px 130px 50px 60px 130px',
-                    padding: '13px 20px', borderBottom: `1px solid ${T.border}`,
-                    alignItems: 'center', transition: 'background 0.1s' }}>
-                  <span style={{ fontSize: 11, fontFamily: T.mono,
-                    color: estIdentifiantLocal(m.id) ? T.amber : T.green, fontWeight: 500 }}
-                    title={estIdentifiantLocal(m.id)
-                      ? 'Saisi hors ligne — pas encore transmis au serveur' : undefined}>
-                    {estIdentifiantLocal(m.id) ? '⇡ LOCAL' : `#${m.id.slice(0,6).toUpperCase()}`}
-                  </span>
-                  <div>
-                    <span style={{ fontSize: 13, fontWeight: 500, color: T.text }}>
-                      {m.vol?.numero_mission ?? m.vol_id.slice(0,12)}
-                    </span>
-                    {m.flag_sensible && <span style={{ marginLeft: 8, fontSize: 10, color: T.amber,
-                      background: T.amberBg, border: `1px solid ${T.amberBorder}`, borderRadius: 4,
-                      padding: '1px 5px' }}>SENSIBLE</span>}
-                  </div>
-                  <span style={{ fontSize: 12, color: T.textDim }}>{new Date(m.createdAt).toLocaleDateString('fr-FR')}</span>
-                  <span style={{ fontSize: 10, fontWeight: 600, color: col, background: `${col}18`,
-                    border: `1px solid ${col}40`, borderRadius: 4, padding: '2px 8px', textTransform: 'uppercase' }}>
-                    {m.statut.replace('_',' ')}
-                  </span>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{m._count?.passagers ?? 0}</span>
-                  <span style={{ fontSize: 12, color: T.textDim }}>v{m.version}</span>
-                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                    {m.statut === 'BROUILLON' && (
-                      <button onClick={e => { e.stopPropagation(); navigate(`/manifestes/${m.id}/edit`); }} style={{
-                        padding: '4px 10px', background: T.greenBg, border: `1px solid ${T.greenBorder}`,
-                        borderRadius: 4, color: T.green, fontSize: 11, cursor: 'pointer', fontWeight: 500 }}>
-                        Saisir
-                      </button>
-                    )}
-                    <button onClick={e => { e.stopPropagation(); navigate(`/manifestes/${m.id}`); }} style={{
-                      padding: '4px 10px', background: T.blueBg, border: `1px solid ${T.blueBorder}`,
-                      borderRadius: 4, color: T.blue, fontSize: 11, cursor: 'pointer', fontWeight: 500 }}>
-                      Voir
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </Card>
-    </div>
-  );
-}
-
-// ─── NOUVEAU MANIFESTE ────────────────────────────────────────────────────────
-function NouveauManifestePage(): React.ReactElement {
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const [vols, setVols] = useState<Vol[]>([]);
-  const [submitting, setSubmitting] = useState(false);
-  const [volId, setVolId] = useState(searchParams.get('vol') ?? '');
-
-  const user = useAuthStore(st => st.user);
-
-  useEffect(() => {
-    volApi.list().then(setVols).catch(() => {});
-  }, []);
-
-  /**
-   * Vols sur lesquels ce chef d'escale peut établir un manifeste.
-   *
-   * `GET /vols` renvoie tous les vols touchant sa base, arrivée comprise. Or on
-   * n'embarque pas au terminus : seuls le DÉPART et les ESCALES sont des points
-   * de saisie. Sur un vol avec correspondance, chaque escale relève du chef
-   * d'escale de cette escale, et de lui seul.
-   *
-   * Ce filtrage est ergonomique — il évite de proposer un vol qui serait refusé.
-   * Le contrôle qui fait foi est celui du manifeste-service.
-   */
-  const volsEligibles = vols.filter(v =>
-    user?.base_id && (
-      v.base_depart_id === user.base_id ||
-      (v.escales ?? []).some(e => e.base_id === user.base_id)
-    ),
-  );
-
-  const volSelectionne = volsEligibles.find(v => v.id === volId);
-
-  /** Point d'embarquement du chef d'escale sur le vol retenu. */
-  const roleSurVol = !volSelectionne || !user?.base_id ? null
-    : volSelectionne.base_depart_id === user.base_id ? 'Départ'
-    : 'Correspondance';
-
-  const handleCreate = async (): Promise<void> => {
-    if (!volId) { toast.error('Sélectionnez un vol'); return; }
-    setSubmitting(true);
-    try {
-      // etape_vol n'est plus transmis : le backend la déduit de la position de
-      // la base sur la route du vol.
-      const m = await manifesteApi.create({ vol_id: volId });
-      toast.success(
-        estIdentifiantLocal(m.id)
-          ? 'Manifeste créé hors ligne — il sera transmis au retour du réseau'
-          : 'Manifeste créé',
-      );
-      navigate(`/manifestes/${m.id}/edit`);
-    } catch (e: unknown) {
-      toast.error(messageErreur(e));
-    } finally { setSubmitting(false); }
-  };
-
-  return (
-    <div style={{ maxWidth: 800, margin: '0 auto' }}>
-      <div style={{ marginBottom: 24 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, color: T.text, fontFamily: T.display }}>Nouveau Manifeste</h1>
-        <p style={{ fontSize: 13, color: T.textDim, marginTop: 4 }}>Rattachement à un vol planifié</p>
-      </div>
-      <Card style={{ padding: '24px 28px' }}>
-        {volsEligibles.length === 0 ? (
-          <div style={{ padding: '16px', background: T.amberBg, border: `1px solid ${T.amberBorder}`,
-            borderRadius: 6, marginBottom: 20, fontSize: 12, color: T.amber, lineHeight: 1.6 }}>
-            {/* Distinguer les deux causes : aucun vol du tout, ou des vols qui
-                ne passent par cette base qu'à l'arrivée. Le second cas est le
-                plus déroutant — l'utilisateur VOIT des vols dans l'onglet Vols
-                mais n'en trouve aucun ici. */}
-            {vols.length === 0 ? (
-              <>⚠ Aucun vol planifié touchant votre base. Un COMBASE ou un COMGMO doit
-                d'abord en planifier un.</>
-            ) : (
-              <>⚠ Aucun vol ne part de votre base ({user?.base_id}) et aucun n'y fait escale.
-                Les {vols.length} vol{vols.length > 1 ? 's' : ''} visible{vols.length > 1 ? 's' : ''} dans
-                l'onglet Vols n'y passe{vols.length > 1 ? 'nt' : ''} qu'à l'arrivée : on n'embarque
-                pas au terminus, il n'y a donc pas de manifeste à y établir.</>
-            )}
-          </div>
-        ) : (
-          <Field label="Vol de rattachement" value={volId} onChange={setVolId} required
-            options={volsEligibles.map(v => ({
-              value: v.id,
-              label: `${v.numero_mission} · ${v.immatriculation} · ${new Date(v.date_heure).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}`
-            }))} />
-        )}
-
-        {volSelectionne && (
-          <div style={{ padding: '14px 16px', background: T.greenBg,
-            border: `1px solid ${T.greenBorder}`, borderRadius: 6, marginBottom: 16 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10 }}>
-              {[
-                ['Aéronef', volSelectionne.immatriculation],
-                ['Type', volSelectionne.type_mission],
-                ['Capacité PAX', String(volSelectionne.capacite_places) + ' places'],
-                ['Cargo', volSelectionne.capacite_cargo_kg + ' kg'],
-                ['Départ', new Date(volSelectionne.date_heure).toLocaleString('fr-FR')],
-              ].map(([l, v]) => (
-                <div key={l}>
-                  <div style={{ fontSize: 10, color: T.textDim, marginBottom: 2 }}>{l}</div>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: T.text }}>{v}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* L'étape n'est plus choisie : elle découle de la position de votre base
-            sur la route du vol. La laisser libre permettait de revendiquer une
-            étape tenue par un autre chef d'escale, ou inexistante sur ce vol. */}
-        {volSelectionne && (
-          <div style={{ padding: '12px 16px', background: T.bgAlt,
-            border: `1px solid ${T.border}`, borderRadius: 6, marginBottom: 16 }}>
-            <div style={{ fontSize: 10, color: T.textDim, marginBottom: 3,
-              textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-              Votre point d'embarquement
-            </div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>
-              {roleSurVol === 'Départ'
-                ? `${user?.base_id} — base de départ (manifeste maître)`
-                : `${user?.base_id} — escale de correspondance`}
-            </div>
-            <div style={{ fontSize: 11, color: T.textDim, marginTop: 4 }}>
-              L'étape du manifeste est déterminée par cette position sur la route du vol.
-            </div>
-          </div>
-        )}
-
-        <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 8 }}>
-          <button onClick={() => navigate('/manifestes')} style={{
-            padding: '10px 24px', background: T.bgAlt, border: `1px solid ${T.border}`,
-            borderRadius: 6, color: T.textSub, fontSize: 13, cursor: 'pointer' }}>Annuler</button>
-          <button onClick={handleCreate} disabled={!volId || submitting} style={{
-            padding: '10px 28px', background: (!volId || submitting) ? T.textMute : T.green,
-            border: 'none', borderRadius: 6, color: '#fff', fontSize: 13, fontWeight: 600,
-            cursor: (!volId || submitting) ? 'not-allowed' : 'pointer' }}>
-            {submitting ? 'Création…' : 'Créer le manifeste →'}
-          </button>
-        </div>
-      </Card>
-    </div>
-  );
-}
-
-// ─── SAISIE ────────────────────────────────────────────────────────────────────
-function SaisieManifestePage(): React.ReactElement {
-  const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
-  const { user } = useAuthStore();
-  const [manifeste, setManifeste] = useState<Manifeste | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<'passagers' | 'materiels' | 'recap'>('passagers');
-  const [submitting, setSubmitting] = useState(false);
-  const [showPrint, setShowPrint] = useState(false);
-
-  const [pax, setPax] = useState<Passager>({
-    nom:'', prenom:'', grade:'', categorie:'TROUPES', matricule:'', unite:'',
-    destination:'', nb_bagages:0, masse_bagages_kg:0, couleur_bagages:'',
-    contact_urgence_nom:'', contact_urgence_tel:'', contact_urgence_qual:'', ref_autorisation:'',
-  });
-  const [mat, setMat] = useState<Materiel>({
-    designation:'', type_mission_log:'AA', proprietaire:'', poids_kg:0,
-    volume:0, destination:'', expediteur_nom:'', expediteur_fonction:'', expediteur_tel:'',
-  });
-  const [savingPax, setSavingPax] = useState(false);
-  const [savingMat, setSavingMat] = useState(false);
-
-  const refresh = async (): Promise<void> => {
-    if (!id) return;
-    const m = await manifesteApi.get(id);
-    setManifeste(m);
-  };
-
-  useEffect(() => {
-    if (!id) return;
-    manifesteApi.get(id).then(m => { setManifeste(m); setLoading(false); })
-      .catch(() => { toast.error('Manifeste introuvable'); setLoading(false); });
-  }, [id]);
-
-  const handleAddPax = async (): Promise<void> => {
-    if (!id || !pax.nom || !pax.prenom || !pax.destination || !pax.contact_urgence_nom || !pax.contact_urgence_tel) {
-      toast.error('Champs obligatoires manquants'); return;
-    }
-    setSavingPax(true);
-    try {
-      await manifesteApi.addPassager(id, pax);
-      toast.success(
-        `${pax.nom} ${pax.prenom} ajouté${estEnLigne() && !estIdentifiantLocal(id ?? '') ? '' : ' (en attente de transmission)'}`,
-      );
-      await refresh();
-      setPax({ nom:'', prenom:'', grade:'', categorie:'TROUPES', matricule:'', unite:'',
-        destination:'', nb_bagages:0, masse_bagages_kg:0, couleur_bagages:'',
-        contact_urgence_nom:'', contact_urgence_tel:'', contact_urgence_qual:'', ref_autorisation:'' });
-    } catch (e: unknown) {
-      toast.error(messageErreur(e));
-    } finally { setSavingPax(false); }
-  };
-
-  const handleAddMat = async (): Promise<void> => {
-    if (!id || !mat.designation || !mat.proprietaire || !mat.expediteur_nom) {
-      toast.error('Champs obligatoires manquants'); return;
-    }
-    setSavingMat(true);
-    try {
-      await manifesteApi.addMateriel(id, mat);
-      toast.success(
-        `"${mat.designation}" ajouté${estEnLigne() && !estIdentifiantLocal(id ?? '') ? '' : ' (en attente de transmission)'}`,
-      );
-      await refresh();
-      setMat({ designation:'', type_mission_log:'AA', proprietaire:'', poids_kg:0,
-        volume:0, destination:'', expediteur_nom:'', expediteur_fonction:'', expediteur_tel:'' });
-    } catch (e: unknown) {
-      toast.error(messageErreur(e));
-    } finally { setSavingMat(false); }
-  };
-
-  const handleSoumettre = async (): Promise<void> => {
-    if (!id) return;
-
-    // Garde en amont, pour un message immédiat et sans appel réseau. La couche
-    // service refuse également : ce contrôle est ergonomique, pas la sécurité.
-    if (!estEnLigne() || estIdentifiantLocal(id)) {
-      toast.error(
-        estIdentifiantLocal(id)
-          ? "Ce manifeste n'a pas encore été transmis au serveur. Rétablir le réseau, " +
-            'attendre la transmission, puis soumettre.'
-          : 'La soumission engage le circuit de validation : elle exige une connexion.',
-      );
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      await manifesteApi.soumettre(id);
-      toast.success('Manifeste soumis au circuit de validation');
-      navigate(`/manifestes/${id}`);
-    } catch (e: unknown) {
-      toast.error(messageErreur(e));
-    } finally { setSubmitting(false); }
-  };
-
-  if (loading) return <div style={{ padding: 48, textAlign: 'center', color: T.textDim }}>Chargement…</div>;
-  if (!manifeste) return <div style={{ padding: 48, textAlign: 'center', color: T.red }}>Manifeste introuvable</div>;
-
-  const readOnly = manifeste.statut !== 'BROUILLON';
-
-  return (
-    <div>
-      {/* En-tête */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
-        <div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: T.text, fontFamily: T.display }}>
-            Manifeste #{manifeste.id.slice(0,6).toUpperCase()}
-          </h1>
-          <p style={{ fontSize: 13, color: T.textDim, marginTop: 4 }}>
-            {manifeste.vol?.numero_mission ?? manifeste.vol_id.slice(0,12)}
-            {manifeste.flag_sensible && <span style={{ marginLeft: 8, color: T.amber }}>◆ SENSIBLE</span>}
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <span style={{ fontSize: 11, fontWeight: 600, color: statusColor(manifeste.statut),
-            background: `${statusColor(manifeste.statut)}18`, border: `1px solid ${statusColor(manifeste.statut)}40`,
-            borderRadius: 6, padding: '5px 12px', textTransform: 'uppercase' }}>
-            {manifeste.statut.replace('_', ' ')}
-          </span>
-          <button onClick={() => setShowPrint(true)} style={{
-            padding: '8px 18px', background: T.bgAlt,
-            border: `1px solid ${T.border}`, borderRadius: 6,
-            color: T.textSub, fontSize: 13, cursor: 'pointer'
-          }}>
-            🖨 Imprimer
-          </button>
-          {!readOnly && (
-            <button onClick={handleSoumettre}
-              disabled={submitting || !estEnLigne() || estIdentifiantLocal(id ?? '')}
-              title={!estEnLigne() || estIdentifiantLocal(id ?? '')
-                ? 'Soumission indisponible hors ligne' : undefined}
-              style={{
-              padding: '8px 20px', background: T.green, border: 'none', borderRadius: 6,
-              color: '#fff', fontSize: 13, fontWeight: 600, cursor: submitting ? 'not-allowed' : 'pointer' }}>
-              {submitting ? 'Soumission…' : 'Soumettre ↗'}
-            </button>
-            
-          )}
-        </div>
-      </div>
-
-      {/* Onglets */}
-      <div style={{ display: 'flex', gap: 2, marginBottom: 16,
-        borderBottom: `2px solid ${T.border}` }}>
-        {(['passagers', 'materiels', 'recap'] as const).map(t => (
-          <button key={t} onClick={() => setTab(t)} style={{
-            padding: '10px 20px', background: 'transparent',
-            border: 'none', borderBottom: tab === t ? `2px solid ${T.green}` : '2px solid transparent',
-            color: tab === t ? T.green : T.textSub, fontSize: 13,
-            fontWeight: tab === t ? 600 : 400, cursor: 'pointer', marginBottom: -2,
-            transition: 'all 0.15s',
-          }}>
-            {t === 'passagers' ? `Passagers (${manifeste.passagers?.length ?? 0})` :
-             t === 'materiels' ? `Matériels (${manifeste.materiels?.length ?? 0})` : 'Récapitulatif'}
-          </button>
-        ))}
-      </div>
-
-      {/* Onglet passagers */}
-      {tab === 'passagers' && (
-        <div style={{ display: 'grid', gridTemplateColumns: readOnly ? '1fr' : '1fr 1fr', gap: 16 }}>
-          {!readOnly && (
-            <Card style={{ padding: '20px 24px' }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 16 }}>
-                Ajouter un passager
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
-                <Field label="Nom" value={pax.nom} onChange={v => setPax({...pax,nom:v})} required />
-                <Field label="Prénom(s)" value={pax.prenom} onChange={v => setPax({...pax,prenom:v})} required />
-                <Field label="Grade" value={pax.grade??''} onChange={v => setPax({...pax,grade:v})} />
-                <Field label="Catégorie" value={pax.categorie} onChange={v => setPax({...pax,categorie:v})} required
-                  options={CATEGORIES.map(c => ({ value:c, label:c.replace('_',' ') }))} />
-                <Field label="Matricule" value={pax.matricule??''} onChange={v => setPax({...pax,matricule:v})} />
-                <Field label="Unité" value={pax.unite??''} onChange={v => setPax({...pax,unite:v})} />
-              </div>
-              <Field label="Destination finale" value={pax.destination} onChange={v => setPax({...pax,destination:v})} required />
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0 16px' }}>
-                <Field label="Nb bagages" value={String(pax.nb_bagages)} type="number" onChange={v => setPax({...pax,nb_bagages:Number(v)})} required />
-                <Field label="Masse (kg)" value={String(pax.masse_bagages_kg)} type="number" onChange={v => setPax({...pax,masse_bagages_kg:Number(v)})} required />
-                <Field label="Couleur bagages" value={pax.couleur_bagages??''} onChange={v => setPax({...pax,couleur_bagages:v})} />
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
-                <Field label="Contact urgence — nom" value={pax.contact_urgence_nom} onChange={v => setPax({...pax,contact_urgence_nom:v})} required />
-                <Field label="Contact urgence — tél" value={pax.contact_urgence_tel} onChange={v => setPax({...pax,contact_urgence_tel:v})} required placeholder="+237XXXXXXXXX" />
-              </div>
-              <Field label="Réf. autorisation" value={pax.ref_autorisation??''} onChange={v => setPax({...pax,ref_autorisation:v})} />
-              {pax.categorie === 'EVASAN' && (
-                <div style={{ padding: '8px 12px', background: T.redBg, border: `1px solid ${T.redBorder}`,
-                  borderRadius: 6, fontSize: 12, color: T.red, marginBottom: 12 }}>
-                  ✚ EVASAN — circuit accéléré activé à la soumission
-                </div>
-              )}
-              {pax.categorie === 'VIP' && (
-                <div style={{ padding: '8px 12px', background: T.amberBg, border: `1px solid ${T.amberBorder}`,
-                  borderRadius: 6, fontSize: 12, color: T.amber, marginBottom: 12 }}>
-                  ◆ VIP — notification COMBASE + CEMAA automatique
-                </div>
-              )}
-              <button onClick={handleAddPax} disabled={savingPax} style={{
-                width: '100%', padding: '10px', background: T.green, border: 'none',
-                borderRadius: 6, color: '#fff', fontSize: 13, fontWeight: 600,
-                cursor: savingPax ? 'not-allowed' : 'pointer' }}>
-                {savingPax ? 'Ajout…' : '+ Ajouter ce passager'}
-              </button>
-            </Card>
-          )}
-          <Card>
-            <div style={{ padding: '14px 20px', borderBottom: `1px solid ${T.border}`,
-              fontSize: 13, fontWeight: 600, color: T.text }}>
-              Liste des passagers ({manifeste.passagers?.length ?? 0})
-            </div>
-            <div style={{ maxHeight: 520, overflowY: 'auto' }}>
-              {!manifeste.passagers?.length ? (
-                <div style={{ padding: 40, textAlign: 'center', color: T.textDim }}>Aucun passager</div>
-              ) : manifeste.passagers.map((p, i) => (
-                <div key={p.id ?? i} style={{ padding: '12px 20px',
-                  borderBottom: `1px solid ${T.border}` }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: T.text }}>
-                      {p.grade && <span style={{ color: T.textDim, marginRight: 6 }}>{p.grade}</span>}
-                      {p.nom} {p.prenom}
-                    </span>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      {p.verrouille && <span style={{ fontSize: 10, color: T.amber, background: T.amberBg,
-                        border: `1px solid ${T.amberBorder}`, borderRadius: 4, padding: '1px 5px' }}>🔒 CEMAA</span>}
-                      <span style={{ fontSize: 10, color: T.textDim, background: T.bgAlt,
-                        borderRadius: 4, padding: '1px 5px' }}>{p.categorie}</span>
-                    </div>
-                  </div>
-                  <div style={{ fontSize: 12, color: T.textDim, display: 'flex', gap: 16 }}>
-                    <span>→ {p.destination}</span>
-                    <span>{p.nb_bagages} bag. · {p.masse_bagages_kg} kg</span>
-                    {p.matricule && <span>Mat: {p.matricule}</span>}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Card>
-        </div>
-      )}
-
-      {/* Onglet matériels */}
-      {tab === 'materiels' && (
-        <div style={{ display: 'grid', gridTemplateColumns: readOnly ? '1fr' : '1fr 1fr', gap: 16 }}>
-          {!readOnly && (
-            <Card style={{ padding: '20px 24px' }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 16 }}>Ajouter un matériel</div>
-              <Field label="Désignation" value={mat.designation} onChange={v => setMat({...mat,designation:v})} required />
-              <Field label="Type logistique" value={mat.type_mission_log} onChange={v => setMat({...mat,type_mission_log:v})} required
-                options={TYPES_LOG.map(t => ({ value:t, label:t.replace('_',' ') }))} />
-              <Field label="Propriétaire / Unité" value={mat.proprietaire} onChange={v => setMat({...mat,proprietaire:v})} required />
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
-                <Field label="Poids (kg)" value={String(mat.poids_kg)} type="number" onChange={v => setMat({...mat,poids_kg:Number(v)})} required />
-                <Field label="Volume (m³)" value={String(mat.volume??0)} type="number" onChange={v => setMat({...mat,volume:Number(v)})} />
-              </div>
-              <Field label="Destination" value={mat.destination} onChange={v => setMat({...mat,destination:v})} required />
-              <Field label="Expéditeur — nom" value={mat.expediteur_nom} onChange={v => setMat({...mat,expediteur_nom:v})} required />
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
-                <Field label="Fonction" value={mat.expediteur_fonction} onChange={v => setMat({...mat,expediteur_fonction:v})} required />
-                <Field label="Téléphone" value={mat.expediteur_tel} onChange={v => setMat({...mat,expediteur_tel:v})} required placeholder="+237XXXXXXXXX" />
-              </div>
-              <button onClick={handleAddMat} disabled={savingMat} style={{
-                width: '100%', padding: '10px', background: T.green, border: 'none',
-                borderRadius: 6, color: '#fff', fontSize: 13, fontWeight: 600,
-                cursor: savingMat ? 'not-allowed' : 'pointer' }}>
-                {savingMat ? 'Ajout…' : '+ Ajouter ce matériel'}
-              </button>
-            </Card>
-          )}
-          <Card>
-            <div style={{ padding: '14px 20px', borderBottom: `1px solid ${T.border}`,
-              fontSize: 13, fontWeight: 600, color: T.text }}>
-              Liste des matériels ({manifeste.materiels?.length ?? 0})
-            </div>
-            <div style={{ maxHeight: 520, overflowY: 'auto' }}>
-              {!manifeste.materiels?.length ? (
-                <div style={{ padding: 40, textAlign: 'center', color: T.textDim }}>Aucun matériel</div>
-              ) : manifeste.materiels.map((m, i) => (
-                <div key={m.id ?? i} style={{ padding: '12px 20px', borderBottom: `1px solid ${T.border}` }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{m.designation}</span>
-                    <span style={{ fontSize: 10, color: T.textDim, background: T.bgAlt,
-                      borderRadius: 4, padding: '1px 5px' }}>{m.type_mission_log}</span>
-                  </div>
-                  <div style={{ fontSize: 12, color: T.textDim, display: 'flex', gap: 16 }}>
-                    <span>{m.poids_kg} kg</span>
-                    <span>→ {m.destination}</span>
-                    <span>{m.proprietaire}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Card>
-        </div>
-      )}
-
-      {/* Récapitulatif */}
-      {tab === 'recap' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <Card style={{ padding: '20px 24px' }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 16 }}>Synthèse</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              {[
-                { l:'Passagers', v: manifeste.passagers?.length ?? 0, c: T.blue },
-                { l:'Matériels', v: manifeste.materiels?.length ?? 0, c: T.textSub },
-                { l:'Masse bagages', v: `${(manifeste.passagers?.reduce((s,p)=>s+Number(p.masse_bagages_kg),0)??0).toFixed(1)} kg`, c: T.green },
-                { l:'Version', v: `v${manifeste.version}`, c: T.textDim },
-              ].map(s => (
-                <div key={s.l} style={{ padding: '12px 16px', background: T.bgAlt,
-                  borderRadius: 6, textAlign: 'center' }}>
-                  <div style={{ fontSize: 10, color: T.textDim, textTransform: 'uppercase',
-                    letterSpacing: '0.08em', marginBottom: 6 }}>{s.l}</div>
-                  <div style={{ fontSize: 24, fontWeight: 700, color: s.c }}>{s.v}</div>
-                </div>
-              ))}
-            </div>
-          </Card>
-          <Card style={{ padding: '20px 24px' }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 16 }}>
-              Circuit de validation
-            </div>
-            {['COMESO','COMGMO','COMBORD','COMBASE'].map((etape, i) => {
-              const v = manifeste.validations?.find(x => x.etape === etape);
-              const col = !v ? T.textMute : v.statut === 'APPROUVE' ? T.green : v.statut === 'REJETE' ? T.red : T.amberLight;
-              return (
-                <div key={etape} style={{ display: 'flex', alignItems: 'center', gap: 12,
-                  padding: '10px 0', borderBottom: i < 3 ? `1px solid ${T.border}` : 'none' }}>
-                  <div style={{ width: 28, height: 28, borderRadius: '50%', background: `${col}20`,
-                    border: `2px solid ${col}`, display: 'flex', alignItems: 'center',
-                    justifyContent: 'center', fontSize: 11, fontWeight: 700, color: col }}>
-                    {!v ? i+1 : v.statut === 'APPROUVE' ? '✓' : v.statut === 'REJETE' ? '✗' : '…'}
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: T.text }}>{etape}</div>
-                    <div style={{ fontSize: 11, color: col }}>
-                      {!v ? 'En attente' : v.statut === 'APPROUVE' ? 'Validé' : v.statut === 'REJETE' ? 'Rejeté' : 'En cours'}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-            {!readOnly && (
-              <button onClick={handleSoumettre}
-              disabled={submitting || !estEnLigne() || estIdentifiantLocal(id ?? '')}
-              title={!estEnLigne() || estIdentifiantLocal(id ?? '')
-                ? 'Soumission indisponible hors ligne' : undefined}
-              style={{
-                width: '100%', marginTop: 16, padding: '10px', background: T.green,
-                border: 'none', borderRadius: 6, color: '#fff', fontSize: 13,
-                fontWeight: 600, cursor: submitting ? 'not-allowed' : 'pointer' }}>
-                {submitting ? 'Soumission…' : '↗ Soumettre au circuit de validation'}
-              </button>
-            )}
-          </Card>
-        </div>
-      )}
-    {/* Modal impression */}
-      {showPrint && manifeste && (
-        <ManifestePrint
-          manifeste={manifeste}
-          onClose={() => setShowPrint(false)}
-        />
-      )}
-    </div>
-  );
-}
 
 export default function ManifestesPage(): React.ReactElement {
   return (
     <Routes>
-      <Route index element={<ManifestesListPage />} />
-      <Route path="nouveau" element={<NouveauManifestePage />} />
-      <Route path=":id/edit" element={<SaisieManifestePage />} />
-      <Route path=":id" element={<SaisieManifestePage />} />
+      <Route index element={<ListeDesManifestes />} />
+      <Route path=":id" element={<DetailManifeste />} />
     </Routes>
+  );
+}
+
+// ─── Inventaire ────────────────────────────────────────────────────────────
+
+function ListeDesManifestes(): React.ReactElement {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['manifestes'],
+    queryFn: manifesteService.lister,
+  });
+
+  return (
+    <div className="p-6">
+      <header className="mb-5">
+        <h1 className="text-2xl font-semibold text-slate-900">Manifestes</h1>
+        <p className="text-sm text-slate-500">
+          Chaque manifeste est l'extrait d'une liste hiérarchisée, émis à l'arrêté
+          du commandant de base. Il ne porte qu'un visa : celui du commandant de bord.
+        </p>
+      </header>
+
+      {error && (
+        <div className="mb-4 rounded border border-red-300 bg-red-50 p-3 text-sm text-red-900">
+          <strong>Chargement impossible.</strong> {messageErreur(error)}
+        </div>
+      )}
+
+      {isLoading && (
+        <p className="flex items-center gap-2 text-sm text-slate-500">
+          <Loader2 className="h-4 w-4 animate-spin" /> Chargement…
+        </p>
+      )}
+
+      {!isLoading && !data?.length && (
+        <p className="rounded-lg border border-dashed border-slate-200 p-8 text-center text-sm italic text-slate-400">
+          Aucun manifeste dans votre périmètre. Ils apparaissent dès qu'un commandant
+          de base arrête une liste.
+        </p>
+      )}
+
+      <ul className="space-y-2">
+        {data?.map((m: ManifesteResume) => {
+          const s = LIBELLE_STATUT[m.statut] ?? { texte: m.statut, classe: 'bg-slate-100' };
+          return (
+            <li key={m.id}>
+              <Link
+                to={`/manifestes/${m.id}`}
+                className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-3 transition hover:shadow-sm"
+              >
+                <div>
+                  <p className="flex items-center gap-2 font-medium text-slate-900">
+                    <Plane className="h-4 w-4 text-blue-700" />
+                    {m.numero_manifeste}
+                    <span className={`rounded px-2 py-0.5 text-xs font-normal ${s.classe}`}>
+                      {s.texte}
+                    </span>
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {m.vol.numero_mission} — escale {m.etape.ordre} — {m.base.code_base}
+                    {' · '}{new Date(m.vol.date_heure).toLocaleString('fr-FR',
+                      { dateStyle: 'short', timeStyle: 'short' })}
+                    {' · '}{m._count.passagers} passager(s)
+                  </p>
+                </div>
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+// ─── Détail ────────────────────────────────────────────────────────────────
+
+function DetailManifeste(): React.ReactElement {
+  const { id } = useParams<{ id: string }>();
+  const { user } = useAuthStore();
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['manifestes', id],
+    queryFn: () => manifesteService.consulter(id!),
+    enabled: Boolean(id),
+  });
+
+  const rafraichir = (): void => {
+    void qc.invalidateQueries({ queryKey: ['manifestes', id] });
+    void qc.invalidateQueries({ queryKey: ['manifestes'] });
+  };
+
+  const retirer = useMutation({
+    mutationFn: (v: { passagerId: string; motif: string }) =>
+      manifesteService.retirerPassager(id!, v.passagerId, v.motif),
+    onSuccess: () => { rafraichir(); toast.success('Passager retiré.'); },
+    onError: (e) => toast.error(messageErreur(e)),
+  });
+
+  const reintegrer = useMutation({
+    mutationFn: (passagerId: string) => manifesteService.reintegrerPassager(id!, passagerId),
+    onSuccess: () => { rafraichir(); toast.success('Passager réintégré.'); },
+    onError: (e) => toast.error(messageErreur(e)),
+  });
+
+  const viser = useMutation({
+    mutationFn: (commentaire?: string) =>
+      manifesteService.viser(data!.liste!.id, commentaire),
+    onSuccess: () => {
+      rafraichir();
+      toast.success('Visa apposé. Le manifeste est définitif.');
+    },
+    onError: (e) => toast.error(messageErreur(e)),
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2 p-8 text-sm text-slate-500">
+        <Loader2 className="h-4 w-4 animate-spin" /> Chargement du manifeste…
+      </div>
+    );
+  }
+
+  if (error || !data) {
+    return (
+      <div className="p-6">
+        <button type="button" onClick={() => navigate('/manifestes')}
+                className="text-sm text-blue-700 hover:underline">
+          ← Tous les manifestes
+        </button>
+        <div className="mt-4 rounded border border-red-300 bg-red-50 p-3 text-sm text-red-900">
+          <strong>Manifeste indisponible.</strong>{' '}
+          {error ? messageErreur(error) : 'Réponse inattendue du serveur.'}
+        </div>
+      </div>
+    );
+  }
+
+  const { manifeste, tableaux, passagers_retires, materiels, equipages, totaux } = data;
+
+  /**
+   * Le commandant de bord de CE vol, et lui seul, peut discriminer.
+   *
+   * Deux conditions : le rôle, et l'identité. Le serveur applique la même
+   * règle ; ce test ne fait que masquer des commandes inutiles. Ne relâchez
+   * jamais l'un en comptant sur l'autre.
+   */
+  const estLeCombord =
+    user?.role === RoleUtilisateur.COMBORD && manifeste.vol.combord_id === user.id;
+  const modifiable = estLeCombord && manifeste.statut === 'EMIS';
+
+  const statut = LIBELLE_STATUT[manifeste.statut] ?? { texte: manifeste.statut, classe: 'bg-slate-100' };
+
+  function demanderMotif(invite: string): string | null {
+    const m = window.prompt(invite);
+    if (m === null) return null;
+    if (m.trim().length < 3) {
+      window.alert("Un motif d'au moins 3 caractères est requis.");
+      return null;
+    }
+    return m.trim();
+  }
+
+  return (
+    <div className="p-6">
+      <header className="mb-5 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <Link to="/manifestes" className="text-sm text-blue-700 hover:underline">
+            ← Tous les manifestes
+          </Link>
+          <h1 className="mt-1 flex items-center gap-3 text-2xl font-semibold text-slate-900">
+            {manifeste.numero}
+            <span className={`rounded px-2 py-0.5 text-sm font-normal ${statut.classe}`}>
+              {statut.texte}
+            </span>
+            {manifeste.flag_sensible && (
+              <span className="rounded bg-red-100 px-2 py-0.5 text-sm font-medium text-red-800">
+                SENSIBLE
+              </span>
+            )}
+          </h1>
+          <p className="text-sm text-slate-500">
+            {manifeste.vol.numero_mission} — {manifeste.vol.immatriculation} — escale{' '}
+            {manifeste.point.ordre} ({manifeste.base.code_base})
+            {' · '}
+            {new Date(manifeste.vol.date_heure).toLocaleString('fr-FR',
+              { dateStyle: 'full', timeStyle: 'short' })}
+          </p>
+          <p className="text-sm text-slate-500">
+            Route : {manifeste.vol.itineraire.map((p) => p.base.code_base).join(' → ')}
+            {' · '}CDB : {manifeste.vol.combord_grade} {manifeste.vol.combord_nom}
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => void ouvrirDocument(`/pdf/manifeste/${manifeste.id}`)}
+          className="inline-flex items-center gap-2 rounded border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+        >
+          <FileText className="h-4 w-4" /> Imprimer le manifeste
+        </button>
+      </header>
+
+      {manifeste.statut === 'DEFINITIF' && (
+        <div className="mb-5 flex gap-3 rounded border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-900">
+          <CheckCircle2 className="h-5 w-5 shrink-0" />
+          <p>
+            <strong>Manifeste définitif.</strong> Visa apposé le{' '}
+            {manifeste.definitif_le
+              ? new Date(manifeste.definitif_le).toLocaleString('fr-FR',
+                  { dateStyle: 'short', timeStyle: 'short' })
+              : ''}
+            . Le document est opposable et ne peut plus être modifié.
+          </p>
+        </div>
+      )}
+
+      {estLeCombord && manifeste.statut === 'EMIS' && (
+        <div className="mb-5 flex gap-3 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          <Send className="h-5 w-5 shrink-0" />
+          <p>
+            <strong>Le manifeste est entre vos mains.</strong> Retirez s'il y a lieu
+            les passagers qui ne montent pas, puis apposez votre visa. La liste
+            d'attente ne vous est pas communiquée : seuls les retenus figurent ici.
+          </p>
+        </div>
+      )}
+
+      <div className="mb-6 flex flex-wrap gap-4 rounded-lg border border-slate-200 bg-white p-4 text-sm">
+        <span><strong className="text-slate-900">{totaux.passagers}</strong> passager(s)</span>
+        <span><strong className="text-slate-900">{totaux.masse_bagages_kg}</strong> kg de bagages</span>
+        <span><strong className="text-slate-900">{totaux.masse_fret_kg}</strong> kg de fret</span>
+        <span className="text-slate-600">
+          Masse totale : {Number((totaux.masse_bagages_kg + totaux.masse_fret_kg).toFixed(2))} kg
+        </span>
+      </div>
+
+      {/* ── Passagers, par priorité ── */}
+      <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold text-slate-900">
+        <Users className="h-5 w-5" /> Passagers embarqués
+      </h2>
+
+      {tableaux.map((t) => (
+        <section key={t.priorite} className="mb-4 rounded-lg border border-slate-200 bg-white">
+          <header className="flex items-center justify-between border-b border-slate-200 px-4 py-2">
+            <h3 className="text-sm font-semibold text-slate-800">
+              {t.libelle}
+              <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-normal text-slate-600">
+                {t.lignes.length}
+              </span>
+            </h3>
+          </header>
+
+          {!t.lignes.length ? (
+            <p className="px-4 py-2 text-sm italic text-slate-400">Aucun passager à cette priorité.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-100 text-left text-xs uppercase tracking-wide text-slate-500">
+                  <th className="px-4 py-2 w-12">Rang</th>
+                  <th className="px-4 py-2">Identité</th>
+                  <th className="px-4 py-2">Unité</th>
+                  <th className="px-4 py-2">Destination</th>
+                  <th className="px-4 py-2 text-center">Bag. / kg</th>
+                  {modifiable && <th className="px-4 py-2 w-24 text-right">Action</th>}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {t.lignes.map((p: PassagerManifeste) => {
+                  const imposee = p.origine !== 'SAISIE';
+                  return (
+                    <tr key={p.id} className={imposee ? 'bg-amber-50/60' : ''}>
+                      <td className="px-4 py-2 font-medium text-slate-700">{p.rang}</td>
+                      <td className="px-4 py-2">
+                        <span className="font-medium text-slate-900">
+                          {p.grade ? `${p.grade} ` : ''}{p.nom} {p.prenom}
+                        </span>
+                        {p.matricule && (
+                          <span className="ml-2 text-xs text-slate-500">{p.matricule}</span>
+                        )}
+                        {imposee && (
+                          <span className="ml-2 rounded bg-amber-200 px-1.5 py-0.5 text-[10px] font-bold uppercase text-amber-900">
+                            Imposé {p.origine}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2 text-slate-600">{p.unite ?? '—'}</td>
+                      <td className="px-4 py-2 text-slate-600">{p.destination}</td>
+                      <td className="px-4 py-2 text-center text-slate-600">
+                        {p.nb_bagages} / {Number(p.masse_bagages_kg)}
+                      </td>
+                      {modifiable && (
+                        <td className="px-4 py-2 text-right">
+                          {imposee ? (
+                            <span className="text-xs italic text-amber-800">Hors discrimination</span>
+                          ) : (
+                            <button
+                              type="button"
+                              title="Retirer du manifeste"
+                              onClick={() => {
+                                const motif = demanderMotif(
+                                  `Motif du retrait de ${p.nom} ${p.prenom} :`,
+                                );
+                                if (motif) retirer.mutate({ passagerId: p.id, motif });
+                              }}
+                              className="rounded p-1 text-red-600 hover:bg-red-50"
+                            >
+                              <UserMinus className="h-4 w-4" />
+                            </button>
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </section>
+      ))}
+
+      {/* ── Retirés : conservés pour tracer la décision ── */}
+      {passagers_retires.length > 0 && (
+        <section className="mb-6 rounded-lg border border-slate-200 bg-slate-50">
+          <header className="border-b border-slate-200 px-4 py-2">
+            <h3 className="text-sm font-semibold text-slate-800">
+              Retirés par le commandant de bord ({passagers_retires.length})
+            </h3>
+            <p className="text-xs text-slate-500">
+              Conservés pour tracer la décision. N'apparaissent pas sur le document imprimé.
+            </p>
+          </header>
+          <ul className="divide-y divide-slate-200">
+            {passagers_retires.map((p) => (
+              <li key={p.id} className="flex items-center justify-between px-4 py-2 text-sm">
+                <span>
+                  <span className="font-medium text-slate-700 line-through">
+                    {p.grade ? `${p.grade} ` : ''}{p.nom} {p.prenom}
+                  </span>
+                  {p.motif_retrait && (
+                    <span className="ml-2 text-xs italic text-slate-500">{p.motif_retrait}</span>
+                  )}
+                </span>
+                {modifiable && (
+                  <button
+                    type="button"
+                    onClick={() => reintegrer.mutate(p.id)}
+                    className="inline-flex items-center gap-1 rounded border border-blue-300 px-2 py-1 text-xs text-blue-700 hover:bg-blue-50"
+                  >
+                    <RotateCcw className="h-3 w-3" /> Réintégrer
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {/* ── Fret ── */}
+      <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold text-slate-900">
+        <Package className="h-5 w-5" /> Fret
+      </h2>
+      <section className="mb-6 rounded-lg border border-slate-200 bg-white">
+        {!materiels.length ? (
+          <p className="px-4 py-3 text-sm italic text-slate-400">Aucun fret déclaré.</p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-100 text-left text-xs uppercase tracking-wide text-slate-500">
+                <th className="px-4 py-2">Désignation</th>
+                <th className="px-4 py-2">Propriétaire</th>
+                <th className="px-4 py-2">Destination</th>
+                <th className="px-4 py-2 text-center">Poids (kg)</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {materiels.map((m) => (
+                <tr key={m.id}>
+                  <td className="px-4 py-2">
+                    {m.designation}
+                    {m.classe_iata && (
+                      <span className="ml-2 text-xs font-bold text-red-700">
+                        IATA {m.classe_iata}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2 text-slate-600">{m.proprietaire}</td>
+                  <td className="px-4 py-2 text-slate-600">{m.destination}</td>
+                  <td className="px-4 py-2 text-center">{Number(m.poids_kg)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      {/* ── Équipage ── */}
+      {equipages.length > 0 && (
+        <section className="mb-6 rounded-lg border border-slate-200 bg-white p-4">
+          <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-600">
+            Équipage
+          </h3>
+          <ul className="space-y-1 text-sm text-slate-700">
+            {equipages.map((e, i) => (
+              <li key={e.id ?? i}>{e.grade} {e.nom} {e.prenom} — {e.fonction}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {/* ── Visa ── */}
+      {modifiable && data.liste && (
+        <section className="sticky bottom-0 -mx-6 border-t border-slate-200 bg-white px-6 py-4 shadow-[0_-2px_8px_rgba(0,0,0,0.04)]">
+          <div className="flex items-center justify-end gap-3">
+            <p className="mr-auto text-xs text-slate-500">
+              Votre visa est la seule signature du manifeste. Une fois apposé,
+              le document devient définitif.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                const commentaire = window.prompt('Commentaire (facultatif) :') ?? undefined;
+                viser.mutate(commentaire || undefined);
+              }}
+              disabled={viser.isPending}
+              className="inline-flex items-center gap-2 rounded bg-blue-700 px-5 py-2 text-sm font-medium text-white hover:bg-blue-800 disabled:opacity-50"
+            >
+              {viser.isPending
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : <Send className="h-4 w-4" />}
+              Apposer mon visa
+            </button>
+          </div>
+        </section>
+      )}
+    </div>
   );
 }

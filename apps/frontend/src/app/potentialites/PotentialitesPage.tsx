@@ -29,6 +29,7 @@ import {
   type Potentialite, type FiltrePotentialite, type PieceJointe,
 } from '@/services/potentialite.service';
 import { useAuthStore } from '@/stores/auth.store';
+import ChampGrade from '@/components/ChampGrade';
 
 function messageErreur(e: unknown): string {
   const err = e as AxiosError<{ message?: string | string[] }>;
@@ -380,7 +381,9 @@ function FormulaireDemandeur(
           <div className="grid gap-3 sm:grid-cols-2">
             <Champ label="Nom" obligatoire><input className={CHAMP} onChange={set('nom')} /></Champ>
             <Champ label="Prénom" obligatoire><input className={CHAMP} onChange={set('prenom')} /></Champ>
-            <Champ label="Grade"><input className={CHAMP} onChange={set('grade')} /></Champ>
+            <Champ label="Grade">
+              <ChampGrade valeur={f.grade ?? ''} onChange={(g) => setF((x) => ({ ...x, grade: g }))} />
+            </Champ>
             <Champ label="Unité"><input className={CHAMP} onChange={set('unite')} /></Champ>
             <Champ label="Matricule"><input className={CHAMP} onChange={set('matricule')} /></Champ>
             <Champ label="CNI"><input className={CHAMP} onChange={set('cni')} /></Champ>

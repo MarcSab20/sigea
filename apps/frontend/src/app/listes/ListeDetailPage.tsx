@@ -44,6 +44,7 @@ import PanneauSelection from '../../components/PanneauSelection';
 import BandeauEtape from '../../components/BandeauEtape';
 import PanneauDelegation from '../../components/PanneauDelegation';
 import type { LigneListe } from '@/services/liste.service';
+import { ouvrirDocument } from '@/lib/api';
 
 /** Rôles autorisés à discriminer, par étape. */
 const ROLE_PAR_ETAPE: Record<string, string[]> = {
@@ -202,13 +203,13 @@ export default function ListeDetailPage(): React.ReactElement {
         </div>
 
         <div className="flex items-center gap-2">
-          <a
-            href={`/api/pdf/liste/${liste.id}`}
-            target="_blank" rel="noreferrer"
+          <button
+            type="button"
+            onClick={() => void ouvrirDocument(`/pdf/liste/${liste.id}`)}
             className="inline-flex items-center gap-2 rounded border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
           >
             <FileText className="h-4 w-4" /> Imprimer la liste
-          </a>
+          </button>
           {saisissable && (
             <button
               type="button"

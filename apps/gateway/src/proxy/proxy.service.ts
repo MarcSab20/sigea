@@ -60,6 +60,8 @@ export class ProxyService {
           headers,
           responseType: 'stream',
           validateStatus: (status) => status < 500,
+          maxBodyLength: 12 * 1024 * 1024,
+          maxContentLength: 12 * 1024 * 1024,
         }),
       );
 
@@ -73,6 +75,10 @@ export class ProxyService {
       for (const h of FORWARDED_RESPONSE_HEADERS) {
         const v = response.headers[h];
         if (v !== undefined) res.setHeader(h, v as string);
+      }
+      const cookies = response.headers['set-cookie'];
+      if (cookies) {
+        res.append('Set-Cookie', cookies as string | string[]);
       }
 
       // 204/205 : pas de corps.

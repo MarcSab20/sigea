@@ -1,223 +1,168 @@
+// apps/frontend/src/services/manifeste.service.ts
+//
+// ═══════════════════════════════════════════════════════════════════════════
+// CE QUI DISPARAÎT
+// ═══════════════════════════════════════════════════════════════════════════
+// La création et l'édition d'un manifeste n'existent plus. Le manifeste est
+// l'EXTRAIT de la liste hiérarchisée, émis automatiquement à l'arrêté du
+// commandant de base. Personne ne le saisit.
+//
+// Les statuts BROUILLON et SOUMIS, le modèle `etape_vol`, les validations à
+// cinq étapes : tout cela appartenait à l'ancien circuit. Le manifeste ne
+// connaît plus que EMIS puis DEFINITIF, et une seule signature — celle du
+// commandant de bord.
+//
+// Le mode hors ligne est également retiré : on ne met pas en file d'attente la
+// discrimination d'un document qui n'a plus qu'une étape, et dont la validité
+// dépend d'un état serveur que le client ne peut pas connaître.
+
 import { api } from '@/lib/api';
-import {
-  estEnLigne, empiler, nouvelIdentifiantLocal, estIdentifiantLocal, lister as listerFile,
-} from '@/offline/outbox';
-import * as brouillons from '@/offline/brouillons';
+import type { Priorite } from '@sigea/shared-types';
 
-export interface EscaleVol {
-  ordre: number;
-  base_id?: string;
-  base?: { code_base: string; nom: string };
+export interface PassagerManifeste {
+  id: string;
+  ligne_liste_id: string;
+  priorite: Priorite;
+  rang: number;
+  nom: string;
+  prenom: string;
+  grade: string | null;
+  categorie: string;
+  matricule: string | null;
+  cni: string | null;
+  unite: string | null;
+  telephone: string;
+  destination: string;
+  debarquement_ordre: number;
+  nb_bagages: number;
+  masse_bagages_kg: string | number;
+  couleur_bagages: string | null;
+  origine: string;
+  retire: boolean;
+  motif_retrait: string | null;
 }
 
-export interface Vol {
-  id: string; numero_mission: string; immatriculation: string;
-  date_heure: string; base_depart_id: string; base_arrivee_id: string;
-  type_mission: string; flag_sensible: boolean;
-  capacite_places: number; capacite_cargo_kg: number; statut: string;
-  /** Escales dans l'ordre de la route. Renvoyées par GET /vols. */
-  escales?: EscaleVol[];
+export interface MaterielManifeste {
+  id: string;
+  designation: string;
+  proprietaire: string;
+  poids_kg: string | number;
+  destination: string;
+  classe_iata: string | null;
+  origine: string;
+  retire: boolean;
+  motif_retrait: string | null;
 }
 
-export interface Manifeste {
-  id: string; vol_id: string; base_id: string; statut: string;
-  etape_vol: string; version: number; flag_sensible: boolean;
-  cree_par: string; createdAt: string; updatedAt: string;
-  vol?: Vol;
-  passagers?: Passager[];
-  materiels?: Materiel[];
-  validations?: ValidationEtape[];
-  _count?: { passagers: number; materiels: number };
+export interface EquipageManifeste {
+  id?: string;
+  nom: string;
+  prenom: string;
+  grade: string;
+  fonction: string;
 }
 
-export interface Passager {
-  id?: string; manifeste_id?: string; base_id?: string;
-  nom: string; prenom: string; grade?: string; categorie: string;
-  matricule?: string; unite?: string; destination: string;
-  nb_bagages: number; masse_bagages_kg: number; couleur_bagages?: string;
-  contact_urgence_nom: string; contact_urgence_tel: string;
-  contact_urgence_qual?: string; ref_autorisation?: string;
-  origine?: string; verrouille?: boolean; sensible?: boolean;
+export interface ManifesteResume {
+  id: string;
+  numero_manifeste: string;
+  statut: 'EMIS' | 'DEFINITIF' | 'ANNULE';
+  emis_le: string;
+  definitif_le: string | null;
+  base: { code_base: string; nom: string };
+  vol: { numero_mission: string; date_heure: string; immatriculation: string };
+  etape: { ordre: number };
+  _count: { passagers: number };
 }
 
-export interface Materiel {
-  id?: string; manifeste_id?: string; designation: string;
-  type_mission_log: string; proprietaire: string; poids_kg: number;
-  volume?: number; destination: string; expediteur_nom: string;
-  expediteur_fonction: string; expediteur_tel: string;
-  origine?: string; verrouille?: boolean; sensible?: boolean;
+export interface TableauPrioriteManifeste {
+  priorite: Priorite;
+  libelle: string;
+  lignes: PassagerManifeste[];
 }
 
-export interface ValidationEtape {
-  id: string; etape: string; statut: string;
-  validateur_id?: string; commentaire?: string; date_heure: string;
-}
-
-export interface CreateManifesteDto {
-  vol_id: string; etape_vol?: string; manifeste_maitre_id?: string;
-}
-
-/**
- * Erreur levée quand une action exige la connexion.
- *
- * Type distinct d'une erreur réseau ordinaire : l'interface doit dire « cette
- * action n'est pas possible hors ligne » et non « la requête a échoué,
- * réessayez » — le second message ferait réessayer indéfiniment.
- */
-export class ActionEnLigneRequise extends Error {
-  constructor(action: string) {
-    super(
-      `${action} exige une connexion. Cette action engage le circuit de validation : ` +
-        'elle ne peut pas être différée.',
-    );
-    this.name = 'ActionEnLigneRequise';
-  }
-}
-
-export const manifesteApi = {
-  /**
-   * Liste serveur, complétée des brouillons saisis hors ligne.
-   *
-   * Les brouillons locaux sont placés en tête : ce sont les plus récents, et
-   * ce sont ceux qui appellent une action de l'opérateur.
-   */
-  list: async (): Promise<Manifeste[]> => {
-    const locaux = brouillons.lister();
-    if (!estEnLigne()) return locaux;
-    try {
-      const { data } = await api.get<Manifeste[]>('/manifestes');
-      return [...locaux, ...data];
-    } catch (e) {
-      // Le navigateur se croit en ligne mais la requête a échoué (portail
-      // captif, serveur injoignable). Afficher au moins les brouillons vaut
-      // mieux qu'un écran vide.
-      if (locaux.length) return locaux;
-      throw e;
-    }
-  },
-
-  get: async (id: string): Promise<Manifeste> => {
-    const local = brouillons.lire(id);
-    if (local) return local;
-    if (estIdentifiantLocal(id)) {
-      throw new Error("Ce brouillon local n'existe plus : il a été transmis ou abandonné.");
-    }
-    return api.get<Manifeste>(`/manifestes/${id}`).then(r => r.data);
-  },
-
-  /**
-   * Création. Hors ligne, un identifiant local est attribué et l'opération
-   * empilée ; l'objet renvoyé permet à l'interface de continuer normalement.
-   */
-  create: async (dto: CreateManifesteDto): Promise<Manifeste> => {
-    if (estEnLigne()) return api.post<Manifeste>('/manifestes', dto).then(r => r.data);
-
-    const id = nouvelIdentifiantLocal();
-    const maintenant = new Date().toISOString();
-    const brouillon: brouillons.BrouillonLocal = {
-      _local: true,
-      id,
-      vol_id: dto.vol_id,
-      base_id: '',
-      statut: 'BROUILLON',
-      etape_vol: dto.etape_vol ?? '',
-      version: 1,
-      flag_sensible: false,
-      cree_par: '',
-      createdAt: maintenant,
-      updatedAt: maintenant,
-      passagers: [],
-      materiels: [],
-      _count: { passagers: 0, materiels: 0 },
+export interface ManifesteDetail {
+  manifeste: {
+    id: string;
+    numero: string;
+    statut: 'EMIS' | 'DEFINITIF' | 'ANNULE';
+    version: number;
+    flag_sensible: boolean;
+    emis_le: string;
+    definitif_le: string | null;
+    base: { code_base: string; nom: string; numero: string };
+    point: { ordre: number };
+    vol: {
+      numero_mission: string;
+      immatriculation: string;
+      date_heure: string;
+      type_mission: string;
+      combord_id: string | null;
+      combord_grade: string;
+      combord_nom: string;
+      combord_prenom: string;
+      itineraire: { ordre: number; base: { code_base: string } }[];
     };
-    brouillons.creer(brouillon);
+  };
+  tableaux: TableauPrioriteManifeste[];
+  passagers_retires: PassagerManifeste[];
+  materiels: MaterielManifeste[];
+  materiels_retires: MaterielManifeste[];
+  equipages: EquipageManifeste[];
+  /** Liste d'origine — porte l'identifiant nécessaire au visa du COMBORD. */
+  liste: {
+    id: string;
+    rmia: string;
+    statut: string;
+    etape_courante: string | null;
+    visas: Array<{
+      etape: string; mention: string; date_heure: string;
+      signataire_nom: string; signataire_grade: string; signataire_titre: string;
+      hash_contenu: string;
+    }>;
+  } | null;
+  totaux: { passagers: number; masse_bagages_kg: number; masse_fret_kg: number };
+}
 
-    await empiler({
-      type: 'MANIFESTE_CREER',
-      methode: 'POST',
-      url: '/manifestes',
-      corps: dto,
-      id_local: id,
-      libelle: 'Création d\'un manifeste',
-    });
+export const manifesteService = {
+  lister() {
+    return api.get<ManifesteResume[]>('/manifestes').then((r) => r.data);
+  },
 
-    return brouillon;
+  consulter(id: string) {
+    return api.get<ManifesteDetail>(`/manifestes/${id}`).then((r) => r.data);
+  },
+
+  retirerPassager(manifeste_id: string, passager_id: string, motif: string) {
+    return api
+      .patch(`/manifestes/${manifeste_id}/passagers/${passager_id}/retrait`, { motif })
+      .then((r) => r.data);
+  },
+
+  reintegrerPassager(manifeste_id: string, passager_id: string) {
+    return api
+      .patch(`/manifestes/${manifeste_id}/passagers/${passager_id}/reintegration`)
+      .then((r) => r.data);
+  },
+
+  retirerMateriel(manifeste_id: string, materiel_id: string, motif: string) {
+    return api
+      .patch(`/manifestes/${manifeste_id}/materiels/${materiel_id}/retrait`, { motif })
+      .then((r) => r.data);
+  },
+
+  definirEquipage(manifeste_id: string, membres: EquipageManifeste[]) {
+    return api.put(`/manifestes/${manifeste_id}/equipage`, { membres }).then((r) => r.data);
   },
 
   /**
-   * Soumission — JAMAIS différée.
+   * Visa du commandant de bord.
    *
-   * Soumettre fait entrer le manifeste dans le circuit de validation et
-   * déclenche des notifications. Empiler cette action reviendrait à faire
-   * croire à l'opérateur que le dossier avance alors qu'il dort dans une file.
+   * Passe par le circuit de la LISTE et non par le manifeste : c'est la même
+   * progression, et la cinquième étape y figure. Le manifeste n'a pas de
+   * machine à états propre — en avoir une seconde obligerait à synchroniser
+   * deux états sur un même dossier.
    */
-  soumettre: (id: string): Promise<Manifeste> => {
-    if (!estEnLigne()) throw new ActionEnLigneRequise('La soumission d\'un manifeste');
-    if (estIdentifiantLocal(id)) {
-      throw new ActionEnLigneRequise(
-        'La soumission de ce manifeste, qui n\'a pas encore été transmis au serveur,',
-      );
-    }
-    return api.patch<Manifeste>(`/manifestes/${id}/soumettre`).then(r => r.data);
+  viser(liste_id: string, commentaire?: string) {
+    return api.post(`/listes/${liste_id}/visa`, { commentaire }).then((r) => r.data);
   },
-
-  addPassager: async (manifesteId: string, p: Passager): Promise<Passager> => {
-    // Un manifeste encore local n'existe pas côté serveur : même en ligne,
-    // l'ajout doit être empilé derrière sa création, sans quoi l'URL partirait
-    // avec un identifiant « local-… ».
-    if (estEnLigne() && !estIdentifiantLocal(manifesteId)) {
-      return api.post<Passager>(`/manifestes/${manifesteId}/passagers`, p).then(r => r.data);
-    }
-
-    brouillons.ajouterPassager(manifesteId, p);
-    await empiler({
-      type: 'PASSAGER_AJOUTER',
-      methode: 'POST',
-      url: `/manifestes/${manifesteId}/passagers`,
-      corps: p,
-      libelle: `Passager ${p.nom} ${p.prenom}`,
-    });
-    return p;
-  },
-
-  addMateriel: async (manifesteId: string, m: Materiel): Promise<Materiel> => {
-    if (estEnLigne() && !estIdentifiantLocal(manifesteId)) {
-      return api.post<Materiel>(`/manifestes/${manifesteId}/materiels`, m).then(r => r.data);
-    }
-
-    brouillons.ajouterMateriel(manifesteId, m);
-    await empiler({
-      type: 'MATERIEL_AJOUTER',
-      methode: 'POST',
-      url: `/manifestes/${manifesteId}/materiels`,
-      corps: m,
-      libelle: `Matériel ${m.designation}`,
-    });
-    return m;
-  },
-};
-
-/**
- * Purge les brouillons locaux dont toutes les opérations ont été transmises.
- *
- * Appelé par le bandeau de synchronisation après chaque rejeu.
- */
-export async function purgerBrouillonsTransmis(): Promise<number> {
-  const enAttente = new Set(
-    (await listerFile())
-      .map(o => o.id_local ?? o.url.match(/\/manifestes\/(local-[^/]+)/)?.[1])
-      .filter((v): v is string => Boolean(v)),
-  );
-  return brouillons.purger(enAttente);
-}
-
-export const volApi = {
-  list: (): Promise<Vol[]> =>
-    api.get<Vol[]>('/vols').then(r => r.data),
-};
-
-export const referentielApi = {
-  bases: () => api.get('/referentiel/bases').then(r => r.data),
-  aeronefs: () => api.get('/referentiel/aeronefs').then(r => r.data),
-  personnels: () => api.get('/referentiel/personnels').then(r => r.data),
 };
